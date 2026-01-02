@@ -28,7 +28,7 @@ tasks:
     deps: [setup]
     dir: ./app
     dotenv:
-      - .env.preview
+      - ../.env.preview
     cmds:
       - bun i
       - bunx --bun astro build
@@ -37,7 +37,7 @@ tasks:
     deps: [setup]
     dir: ./app
     dotenv:
-      - .env.prod
+      - ../.env.prod
     cmds:
       - bun i
       - bunx --bun astro build

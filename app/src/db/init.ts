@@ -48,12 +48,38 @@ export async function prepareSpaceDb(spaceId: string) {
   const revisionSQL = generateCreateTableSQL(spaceSchema.revision);
   const propertySQL = generateCreateTableSQL(spaceSchema.property);
   const connectionSQL = generateCreateTableSQL(spaceSchema.connection);
+  const categorySQL = generateCreateTableSQL(spaceSchema.category);
 
   await spaceDb.run(sql.raw(metadataSQL));
   await spaceDb.run(sql.raw(documentSQL));
   await spaceDb.run(sql.raw(revisionSQL));
   await spaceDb.run(sql.raw(propertySQL));
   await spaceDb.run(sql.raw(connectionSQL));
+  await spaceDb.run(sql.raw(categorySQL));
+
+  const preferenceSQL = generateCreateTableSQL(spaceSchema.preference);
+  await spaceDb.run(sql.raw(preferenceSQL));
+
+  const extensionSQL = generateCreateTableSQL(spaceSchema.extension);
+  await spaceDb.run(sql.raw(extensionSQL));
+
+  const extensionStorageSQL = generateCreateTableSQL(spaceSchema.extensionStorage);
+  await spaceDb.run(sql.raw(extensionStorageSQL));
+
+  const commentsSQL = generateCreateTableSQL(spaceSchema.comment);
+  await spaceDb.run(sql.raw(commentsSQL));
+
+  const aclSQL = generateCreateTableSQL(spaceSchema.acl);
+  await spaceDb.run(sql.raw(aclSQL));
+
+  const auditLogSQL = generateCreateTableSQL(spaceSchema.auditLog);
+  await spaceDb.run(sql.raw(auditLogSQL));
+
+  const webhookSQL = generateCreateTableSQL(spaceSchema.webhook);
+  await spaceDb.run(sql.raw(webhookSQL));
+
+  const accessTokenSQL = generateCreateTableSQL(spaceSchema.accessToken);
+  await spaceDb.run(sql.raw(accessTokenSQL));
 
   await spaceDb.run(
     sql.raw(`
@@ -101,92 +127,6 @@ export async function prepareSpaceDb(spaceId: string) {
 			END
 		`),
   );
-
-  // Ensure preference table exists (migration for existing spaces)
-  try {
-    const preferenceSQL = generateCreateTableSQL(spaceSchema.preference);
-    await spaceDb.run(sql.raw(preferenceSQL));
-  } catch (err) {
-    // console.error("Failed to create preference table:", err);
-  }
-
-  // Ensure extension table exists (migration for existing spaces)
-  try {
-    const extensionSQL = generateCreateTableSQL(spaceSchema.extension);
-    await spaceDb.run(sql.raw(extensionSQL));
-  } catch (err) {
-    // console.error("Failed to create preference table:", err);
-  }
-
-  // Ensure extension-storage table exists (migration for existing spaces)
-  try {
-    const extensionStorageSQL = generateCreateTableSQL(spaceSchema.extensionStorage);
-    await spaceDb.run(sql.raw(extensionStorageSQL));
-  } catch (err) {
-    // console.error("Failed to create preference table:", err);
-  }
-
-  // Add userId column to preference table (migration for existing spaces)
-  try {
-    await spaceDb.run(sql.raw(`ALTER TABLE preference ADD COLUMN user_id TEXT`));
-  } catch (err) {
-    // console.error("Failed to add document_id to webhook table:", err);
-  }
-
-  // Ensure comments table exists (migration for existing spaces)
-  try {
-    const commentsSQL = generateCreateTableSQL(spaceSchema.comment);
-    await spaceDb.run(sql.raw(commentsSQL));
-  } catch (err) {
-    console.error("Failed to create comments table:", err);
-  }
-
-  // Ensure category table exists (migration for existing spaces)
-  try {
-    const categorySQL = generateCreateTableSQL(spaceSchema.category);
-    await spaceDb.run(sql.raw(categorySQL));
-  } catch (err) {
-    // console.error("Failed to create category table:", err);
-  }
-
-  // Add order column to categories table (migration for existing spaces)
-  try {
-    await spaceDb.run(sql.raw(`ALTER TABLE category ADD COLUMN "order" INT`));
-  } catch (err) {
-    // console.error("Failed to add order to category table:", err);
-  }
-
-  // Ensure ACL table exists (migration for existing spaces)
-  try {
-    const aclSQL = generateCreateTableSQL(spaceSchema.acl);
-    await spaceDb.run(sql.raw(aclSQL));
-  } catch (err) {
-    // console.error("Failed to create ACL table:", err);
-  }
-
-  // Ensure audit_log table exists (migration for existing spaces)
-  try {
-    const auditLogSQL = generateCreateTableSQL(spaceSchema.auditLog);
-    await spaceDb.run(sql.raw(auditLogSQL));
-  } catch (err) {
-    // console.error("Failed to create audit_log table:", err);
-  }
-
-  // Ensure webhook table exists (migration for existing spaces)
-  try {
-    const webhookSQL = generateCreateTableSQL(spaceSchema.webhook);
-    await spaceDb.run(sql.raw(webhookSQL));
-  } catch (err) {
-    // console.error("Failed to create webhook table:", err);
-  }
-
-  // Ensure access_token table exists (migration for existing spaces)
-  try {
-    const accessTokenSQL = generateCreateTableSQL(spaceSchema.accessToken);
-    await spaceDb.run(sql.raw(accessTokenSQL));
-  } catch (error) {
-    // Table already exists
-  }
 
   // Ensure FTS5 virtual table exists (migration for existing spaces)
   try {

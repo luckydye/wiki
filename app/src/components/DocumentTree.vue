@@ -314,12 +314,8 @@ onUnmounted(() => {
 
 <template>
   <div class="document-tree">
-    <div v-if="categories.length > 0 && categoriesWithDocs.length === 0" class="px-3 py-4 text-center">
-      <p class="text-sm text-neutral">No documents yet</p>
-    </div>
-
     <!-- Categories Header with Edit Button -->
-    <div v-if="categories.length > 0" class="flex items-center justify-between gap-3xs px-3xs mb-2">
+    <div class="flex items-center justify-between gap-3xs px-3xs mb-2">
       <h3 class="text-xs font-medium text-neutral-900 uppercase tracking-wider opacity-50">
         Categories
       </h3>
@@ -337,7 +333,9 @@ onUnmounted(() => {
       </button>
     </div>
 
-
+    <div v-if="!isEditMode && categories.length === 0" class="px-3 py-4 text-center">
+      <p class="text-sm text-neutral-500">No categories yet</p>
+    </div>
 
     <!-- Categories List and Documents -->
     <div class="px-2 space-y-1">

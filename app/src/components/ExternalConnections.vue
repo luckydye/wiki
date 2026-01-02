@@ -17,6 +17,10 @@
       </button>
     </div>
 
+    <div v-if="!isEditMode && connections.length === 0" class="px-3 py-4 text-center">
+      <p class="text-sm text-neutral-500">No connections yet</p>
+    </div>
+
     <!-- Connections List -->
     <div class="relative">
       <a v-for="connection in connections" :key="connection.id" :href="connection.url" target="_blank"

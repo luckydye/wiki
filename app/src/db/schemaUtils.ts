@@ -17,7 +17,7 @@ export function generateCreateTableSQL(table: SQLiteTable): string {
 
   for (const column of columns) {
     const col = column as any;
-    let def = `${col.name} ${getSQLiteType(col)}`;
+    let def = `"${col.name}" ${getSQLiteType(col)}`;
 
     // Only add PRIMARY KEY if there's no composite primary key
     if (col.primary && (!config.primaryKeys || config.primaryKeys.length === 0)) {
