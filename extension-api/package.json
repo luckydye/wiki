@@ -1,0 +1,9 @@
+{
+  "name": "@wiki/extension",
+  "version": "0.1.0",
+  "bin": "./cli.ts",
+  "types": "./types.ts",
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

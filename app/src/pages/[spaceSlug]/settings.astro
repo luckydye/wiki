@@ -1,0 +1,47 @@
+---
+import NoAccess from "../../components/NoAccess.vue";
+import SpaceSettings from "../../components/SpaceSettings.vue";
+import { hasPermission, ResourceType, getUserGroups } from "../../db/acl.ts";
+import { getSpaceBySlug } from "../../db/spaces.ts";
+import SpaceLayout from "../../layouts/SpaceLayout.astro";
+
+if (!Astro.locals.session) {
+  return Astro.redirect("/login");
+}
+
+const { spaceSlug } = Astro.params;
+
+if (!spaceSlug) {
+  return Astro.redirect("/");
+}
+
+const space = await getSpaceBySlug(spaceSlug);
+
+if (!space) {
+  return new Response(null, {
+    status: 404,
+    statusText: "Space not found",
+  });
+}
+
+// Check ACL permissions - user must be owner
+const userGroups = await getUserGroups(Astro.locals.user!.id);
+const isOwner = await hasPermission(
+  space.id,
+  ResourceType.SPACE,
+  space.id,
+  Astro.locals.user!.id,
+  "owner",
+  userGroups,
+);
+
+if(!isOwner) {
+  Astro.response.status = 403;
+}
+---
+
+<SpaceLayout title={`Settings - ${space.name} - Wiki`}>
+  <div class="mx-auto pt-m pb-20 lg:pb-8 overflow-hidden h-full print:px-0 px-xs lg:px-xl">
+    {isOwner ? <SpaceSettings client:load /> : <NoAccess client:load /> }
+  </div>
+</SpaceLayout>

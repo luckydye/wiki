@@ -1,0 +1,85 @@
+# https://taskfile.dev
+
+version: "3"
+
+dotenv:
+  - .env
+
+tasks:
+  setup:
+    cmds:
+      - bun i
+      - cd app && bun i
+
+  dev:
+    deps: [setup]
+    aliases: [d]
+    cmd: task --parallel app server
+  app:
+    dir: ./app
+    cmds:
+      - bunx --bun astro dev --host
+  server:
+    dir: ./app
+    cmds:
+      - bun ./src/server.ts
+
+  preview:
+    deps: [setup]
+    dir: ./app
+    dotenv:
+      - .env.preview
+    cmds:
+      - bun i
+      - bunx --bun astro build
+      - bun ./src/server.ts
+  prod:
+    deps: [setup]
+    dir: ./app
+    dotenv:
+      - .env.prod
+    cmds:
+      - bun i
+      - bunx --bun astro build
+      - bun ./src/server.ts
+
+  compile:
+    dir: ./app
+    desc: Compile full app with server into a single executable using bun.
+    cmds:
+      - bun build ./src/server.ts --compile --outfile ./wiki
+
+  docker:build:
+    cmds:
+      - docker build . --tag wiki
+  docker:up:
+    cmd: docker compose up --build
+
+  test:
+    dir: ./app
+    cmds:
+      - bun test {{.CLI_ARGS}}
+
+  drizzle:
+    dir: ./app
+    cmd: bunx drizzle-kit {{.CLI_ARGS}}
+
+  icons:
+    dir: ui/src/assets
+    cmd: python3 split-icons.py
+
+  xwiki:convert:
+    desc: Convert XWiki HTML export to Markdown (use --zip for ZIP output)
+    cmd: bun scripts/xwiki-to-markdown.js {{.CLI_ARGS}}
+
+  perf:test-data:
+    desc: Generate 20000 documents with revisions for performance testing
+    cmd: bun scripts/create-perf-test-data.ts
+
+  extension:create:
+    desc: Scaffold a new extension package
+    cmd: bun x @wiki/extension create {{.CLI_ARGS}}
+
+  extension:package:
+    desc: Build and package an extension as a zip file
+    cmd: bun x @wiki/extension package {{.CLI_ARGS}}

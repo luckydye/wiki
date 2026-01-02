@@ -1,0 +1,32 @@
+---
+import "../styles/index.css";
+
+export interface Props {
+  title?: string;
+}
+
+const { title = "Wiki" } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+  </head>
+
+  <body class="bg-background font-sans">
+    <div class="mx-auto min-h-screen grid grid-rows-[1fr]">
+      <main class="h-full">
+        <div class="px-10 py-8 pt-5 h-full flex justify-center items-center">
+          <div class="content">
+            <slot />
+          </div>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

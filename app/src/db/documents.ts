@@ -1,0 +1,1515 @@
+import { and, desc, eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/libsql";
+import {
+  grantPermission,
+  listAccessibleResources,
+  Permission,
+  ResourceType,
+} from "./acl.ts";
+import { createAuditLog } from "./auditLogs.ts";
+import { getSpaceDb } from "./db.ts";
+import { createRevision } from "./revisions.ts";
+import { document, property, revision } from "./schema/space.ts";
+import { slugify } from "../utils/utils.ts";
+import { triggerWebhooks } from "./webhooks.ts";
+import { extractMentionsFromHtml } from "./mentions.ts";
+import { decompressHtml } from "./revisions.ts";
+
+async function generateUniqueSlug(
+  spaceId: string,
+  baseTitle: string,
+  excludeDocumentId?: string,
+): Promise<string> {
+  const db = getSpaceDb(spaceId);
+
+  let baseSlug = slugify(baseTitle);
+  if (!baseSlug) {
+    throw new Error("slug is empty")
+  }
+
+  // Get all existing slugs in the space
+  const allDocs = await db
+    .select({ id: document.id, slug: document.slug })
+    .from(document)
+    .all();
+
+  const existingSlugs = new Set(
+    allDocs
+      .filter((d) => d.id !== excludeDocumentId)
+      .map((d) => d.slug)
+  );
+
+  // If the base slug is available, use it
+  if (!existingSlugs.has(baseSlug)) {
+    return baseSlug;
+  }
+
+  // Otherwise, append a counter to make it unique
+  let slug = baseSlug;
+  let counter = 1;
+
+  while (existingSlugs.has(slug)) {
+    slug = `${baseSlug}-${counter}`;
+    counter++;
+  }
+
+  return slug;
+}
+
+async function updateDocumentFts(spaceId: string, documentId: string): Promise<void> {
+  const db = getSpaceDb(spaceId);
+
+  const doc = await db.select().from(document).where(eq(document.id, documentId)).get();
+
+  if (!doc) {
+    return;
+  }
+
+  const props = await db
+    .select()
+    .from(property)
+    .where(eq(property.documentId, documentId))
+    .all();
+
+  const titleProp = props.find((p) => p.key === "title");
+  const propsText = props.map((p) => `${p.key}: ${p.value}`).join(" ");
+
+  await db.run(sql`
+		DELETE FROM document_fts
+		WHERE rowid = (SELECT rowid FROM document WHERE id = ${documentId})
+	`);
+
+  await db.run(sql`
+		INSERT INTO document_fts(rowid, title, properties, content)
+		VALUES (
+			(SELECT rowid FROM document WHERE id = ${documentId}),
+			${titleProp?.value || ""},
+			${propsText},
+			${doc.content}
+		)
+	`);
+}
+
+export interface DocumentWithProperties {
+  id: string;
+  slug: string;
+  type?: string | null;
+  content?: string;
+  currentRev: number;
+  publishedRev: number | null;
+  properties: Record<string, string>;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy: string;
+  parentId: string | null;
+  readonly: boolean;
+  archived: boolean;
+  mentionCount?: number;
+}
+
+export type SearchResult = DocumentWithProperties & {
+  rank: number;
+  snippet: string;
+};
+
+// Property filter for advanced search
+// Use value: null to filter for documents that have the property (any value)
+// Use value: string to filter for documents with that specific property value
+export interface PropertyFilter {
+  key: string;
+  value: string | null;
+}
+
+export async function createDocument(
+  spaceId: string,
+  createdBy: string,
+  slug: string,
+  content: string,
+  initialProperties?: Record<string, string>,
+  parentId?: string | null,
+  type?: string,
+  createdAt?: Date,
+  updatedAt?: Date,
+): Promise<DocumentWithProperties> {
+  const db = getSpaceDb(spaceId);
+  const id = crypto.randomUUID();
+  const now = new Date();
+  const documentCreatedAt = createdAt || now;
+  const documentUpdatedAt = updatedAt || now;
+
+  // Generate a unique slug if the provided slug already exists
+  const uniqueSlug = await generateUniqueSlug(spaceId, slug);
+
+  await db.insert(document).values({
+    id,
+    slug: uniqueSlug,
+    type: type || null,
+    content,
+    currentRev: 0,
+    publishedRev: null,
+    createdBy: createdBy,
+    parentId: parentId || null,
+    archived: false,
+    readonly: false,
+    createdAt: documentCreatedAt,
+    updatedAt: documentUpdatedAt,
+  });
+
+  const properties = initialProperties || {};
+
+  for (const [key, value] of Object.entries(properties)) {
+    await db.insert(property).values({
+      id: crypto.randomUUID(),
+      documentId: id,
+      key,
+      value,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  await grantPermission(spaceId, ResourceType.DOCUMENT, id, createdBy, Permission.OWNER);
+
+  await updateDocumentFts(spaceId, id);
+
+  await createRevision(spaceId, id, content, createdBy, "Initial revision");
+
+  await createAuditLog(getSpaceDb(spaceId), {
+    docId: id,
+    revisionId: 1,
+    userId: createdBy,
+    event: "create",
+    details: { message: "Document created" },
+  });
+
+  return {
+    id,
+    slug: uniqueSlug,
+    type: type || null,
+    content,
+    currentRev: 1,
+    publishedRev: null,
+    properties,
+    createdAt: documentCreatedAt,
+    updatedAt: documentUpdatedAt,
+    createdBy: createdBy,
+    parentId: parentId || null,
+    readonly: false,
+    archived: false,
+  };
+}
+
+export async function getDocument(
+  spaceId: string,
+  id: string,
+): Promise<DocumentWithProperties | null> {
+  const db = getSpaceDb(spaceId);
+  const doc = await db.select().from(document).where(eq(document.id, id)).get();
+
+  if (!doc) {
+    return null;
+  }
+
+  const props = await db.select().from(property).where(eq(property.documentId, id)).all();
+
+  const properties: Record<string, string> = {};
+  for (const prop of props) {
+    properties[prop.key] = prop.value;
+  }
+
+  return {
+    id: doc.id,
+    slug: doc.slug,
+    type: doc.type,
+    content: doc.content,
+    currentRev: doc.currentRev,
+    publishedRev: doc.publishedRev,
+    properties,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+    createdBy: doc.createdBy,
+    parentId: doc.parentId || null,
+    readonly: doc.readonly,
+    archived: doc.archived,
+  };
+}
+
+export async function getDocumentBySlug(
+  spaceId: string,
+  slug: string,
+): Promise<DocumentWithProperties | null> {
+  const db = getSpaceDb(spaceId);
+  const doc = await db.select().from(document).where(eq(document.slug, slug)).get();
+
+  if (!doc) {
+    return null;
+  }
+
+  const props = await db
+    .select()
+    .from(property)
+    .where(eq(property.documentId, doc.id))
+    .all();
+
+  const properties: Record<string, string> = {};
+  for (const prop of props) {
+    properties[prop.key] = prop.value;
+  }
+
+  return {
+    id: doc.id,
+    slug: doc.slug,
+    type: doc.type,
+    content: doc.content,
+    currentRev: doc.currentRev,
+    publishedRev: doc.publishedRev,
+    properties,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+    createdBy: doc.createdBy,
+    parentId: doc.parentId || null,
+    readonly: doc.readonly,
+    archived: doc.archived,
+  };
+}
+
+export async function updateDocument(
+  spaceId: string,
+  id: string,
+  content: string,
+  userId?: string,
+): Promise<DocumentWithProperties | null> {
+  const db = getSpaceDb(spaceId);
+  const existing = await getDocument(spaceId, id);
+  if (!existing) {
+    return null;
+  }
+
+  const now = new Date();
+
+  await db.update(document).set({ content, updatedAt: now }).where(eq(document.id, id));
+
+  const title = existing.properties.title || "";
+  const propsText = Object.entries(existing.properties)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join(" ");
+
+  await db.run(sql`
+		DELETE FROM document_fts
+		WHERE rowid = (SELECT rowid FROM document WHERE id = ${id})
+	`);
+
+  await db.run(sql`
+		INSERT INTO document_fts(rowid, title, properties, content)
+		VALUES (
+			(SELECT rowid FROM document WHERE id = ${id}),
+			${title},
+			${propsText},
+			${content}
+		)
+	`);
+
+  if (userId) {
+    await createAuditLog(db, {
+      docId: id,
+      userId,
+      event: "save",
+      details: { message: "Document updated" },
+    });
+  }
+
+  return {
+    id,
+    slug: existing.slug,
+    content,
+    currentRev: existing.currentRev,
+    publishedRev: existing.publishedRev,
+    properties: existing.properties,
+    createdAt: existing.createdAt,
+    updatedAt: now,
+    createdBy: existing.createdBy,
+    parentId: existing.parentId,
+    readonly: existing.readonly,
+    type: existing.type,
+    archived: existing.archived,
+  };
+}
+
+export async function archiveDocument(
+  spaceId: string,
+  id: string,
+  userId?: string,
+): Promise<boolean> {
+  const db = getSpaceDb(spaceId);
+
+  if (userId) {
+    await createAuditLog(db, {
+      docId: id,
+      userId,
+      event: "archive",
+      details: { message: "Document archived" },
+    });
+  }
+
+  await db
+    .update(document)
+    .set({ archived: true, updatedAt: new Date() })
+    .where(eq(document.id, id));
+
+  await triggerWebhooks(db, {
+    event: "document.archived",
+    spaceId,
+    documentId: id,
+    timestamp: new Date().toISOString(),
+  });
+
+  return true;
+}
+
+export async function restoreDocument(
+  spaceId: string,
+  id: string,
+  userId?: string,
+): Promise<boolean> {
+  const db = getSpaceDb(spaceId);
+
+  if (userId) {
+    await createAuditLog(db, {
+      docId: id,
+      userId,
+      event: "restore",
+      details: { message: "Document restored" },
+    });
+  }
+
+  await db
+    .update(document)
+    .set({ archived: false, updatedAt: new Date() })
+    .where(eq(document.id, id));
+
+  await triggerWebhooks(db, {
+    event: "document.restored",
+    spaceId,
+    documentId: id,
+    timestamp: new Date().toISOString(),
+  });
+
+  return true;
+}
+
+export async function deleteDocument(
+  spaceId: string,
+  id: string,
+  userId?: string,
+): Promise<boolean> {
+  const db = getSpaceDb(spaceId);
+
+  if (userId) {
+    await createAuditLog(db, {
+      docId: id,
+      userId,
+      event: "delete",
+      details: { message: "Document deleted" },
+    });
+  }
+
+  await db.run(sql`
+		DELETE FROM document_fts
+		WHERE rowid = (SELECT rowid FROM document WHERE id = ${id})
+	`);
+
+  await db.delete(document).where(eq(document.id, id));
+
+  await triggerWebhooks(db, {
+    event: "document.deleted",
+    spaceId,
+    documentId: id,
+    timestamp: new Date().toISOString(),
+  });
+
+  return true;
+}
+
+export async function listDocuments(
+  spaceId: string,
+  limit?: number,
+  offset?: number,
+): Promise<{ documents: DocumentWithProperties[]; total: number }> {
+  const db = getSpaceDb(spaceId);
+
+  // Get total count first
+  const countResult = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(document)
+    .where(eq(document.archived, false))
+    .get();
+
+  const total = countResult?.count || 0;
+
+  // Build query
+  const baseQuery = db
+    .select({
+      id: document.id,
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt,
+      parentId: document.parentId,
+      publishedRev: document.publishedRev,
+      slug: document.slug,
+      type: document.type,
+      currentRev: document.currentRev,
+      createdBy: document.createdBy,
+      readonly: document.readonly,
+      archived: document.archived,
+    })
+    .from(document)
+    .where(eq(document.archived, false))
+    .orderBy(desc(document.updatedAt));
+
+  // Apply pagination if provided
+  let docs: Array<{
+    id: string;
+    createdAt: Date;
+    updatedAt: Date;
+    parentId: string | null;
+    publishedRev: number | null;
+    slug: string;
+    type: string | null;
+    currentRev: number;
+    createdBy: string;
+    readonly: boolean;
+    archived: boolean;
+  }>;
+  if (limit !== undefined && offset !== undefined) {
+    docs = await baseQuery.limit(limit).offset(offset).all();
+  } else if (limit !== undefined) {
+    docs = await baseQuery.limit(limit).all();
+  } else if (offset !== undefined) {
+    docs = await baseQuery.offset(offset).all();
+  } else {
+    docs = await baseQuery.all();
+  }
+
+  // Fetch all properties in one query instead of N queries
+  const allProps = await db
+    .select()
+    .from(property)
+    .all();
+
+  // Group properties by document ID
+  const propsByDocId = new Map<string, Record<string, string>>();
+  for (const prop of allProps) {
+    if (!propsByDocId.has(prop.documentId)) {
+      propsByDocId.set(prop.documentId, {});
+    }
+    propsByDocId.get(prop.documentId)![prop.key] = prop.value;
+  }
+
+  // Build results
+  const results: DocumentWithProperties[] = docs.map(doc => ({
+    id: doc.id,
+    slug: doc.slug,
+    type: doc.type || "document",
+    content: "", // Empty content for list view - fetch separately when viewing
+    currentRev: doc.currentRev,
+    publishedRev: doc.publishedRev,
+    properties: propsByDocId.get(doc.id) || {},
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+    createdBy: doc.createdBy,
+    parentId: doc.parentId || null,
+    readonly: doc.readonly,
+    archived: doc.archived,
+  }));
+
+  return { documents: results, total };
+}
+
+export async function listArchivedDocuments(
+  spaceId: string,
+): Promise<DocumentWithProperties[]> {
+  const db = getSpaceDb(spaceId);
+
+  const docs = await db
+    .select({
+      id: document.id,
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt,
+      parentId: document.parentId,
+      publishedRev: document.publishedRev,
+      slug: document.slug,
+      type: document.type,
+      currentRev: document.currentRev,
+      createdBy: document.createdBy,
+      readonly: document.readonly,
+      archived: document.archived,
+    })
+    .from(document)
+    .where(eq(document.archived, true))
+    .all();
+
+  const allProps = await db
+    .select()
+    .from(property)
+    .all();
+
+  const propsByDocId = new Map<string, Record<string, string>>();
+  for (const prop of allProps) {
+    if (!propsByDocId.has(prop.documentId)) {
+      propsByDocId.set(prop.documentId, {});
+    }
+    propsByDocId.get(prop.documentId)![prop.key] = prop.value;
+  }
+
+  const results: DocumentWithProperties[] = docs.map(doc => ({
+    id: doc.id,
+    slug: doc.slug,
+    type: doc.type,
+    content: "",
+    currentRev: doc.currentRev,
+    publishedRev: doc.publishedRev,
+    properties: propsByDocId.get(doc.id) || {},
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+    createdBy: doc.createdBy,
+    parentId: doc.parentId || null,
+    readonly: doc.readonly,
+    archived: doc.archived,
+  }));
+
+  return results;
+}
+
+export async function getDocumentCountsByCategory(
+  spaceId: string,
+): Promise<{ counts: Record<string, number>; firstDocs: Record<string, { id: string; slug: string }> }> {
+  const db = getSpaceDb(spaceId);
+
+  // Get all document IDs and slugs
+  const docs = await db
+    .select({
+      id: document.id,
+      slug: document.slug,
+    })
+    .from(document)
+    .where(eq(document.archived, false))
+    .all();
+
+  if (docs.length === 0) {
+    return { counts: {}, firstDocs: {} };
+  }
+
+  // Get category/collection properties for all documents
+  const categoryProps = await db
+    .select({
+      documentId: property.documentId,
+      key: property.key,
+      value: property.value,
+    })
+    .from(property)
+    .where(sql`${property.key} IN ('category', 'collection')`)
+    .all();
+
+  // Build counts and first docs per category
+  const counts: Record<string, number> = {};
+  const firstDocs: Record<string, { id: string; slug: string }> = {};
+  const docMap = new Map(docs.map(d => [d.id, d]));
+
+  for (const prop of categoryProps) {
+    const category = prop.value;
+    counts[category] = (counts[category] || 0) + 1;
+
+    if (!firstDocs[category]) {
+      const doc = docMap.get(prop.documentId);
+      if (doc) {
+        firstDocs[category] = { id: doc.id, slug: doc.slug };
+      }
+    }
+  }
+
+  return { counts, firstDocs };
+}
+
+export async function countDocuments(
+  spaceId: string,
+): Promise<number> {
+  const db = getSpaceDb(spaceId);
+
+  const result = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(document)
+    .where(eq(document.archived, false))
+    .get();
+
+  return result?.count || 0;
+}
+
+export async function listDraftDocuments(
+  spaceId: string,
+  limit?: number,
+  offset?: number,
+): Promise<{ documents: DocumentWithProperties[]; total: number }> {
+  const db = getSpaceDb(spaceId);
+
+  // Get all documents
+  const docs = await db
+    .select({
+      id: document.id,
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt,
+      parentId: document.parentId,
+      publishedRev: document.publishedRev,
+      slug: document.slug,
+      type: document.type,
+      currentRev: document.currentRev,
+      createdBy: document.createdBy,
+      readonly: document.readonly,
+      archived: document.archived,
+    })
+    .from(document)
+    .where(eq(document.archived, false))
+    .orderBy(desc(document.updatedAt))
+    .all();
+
+  if (docs.length === 0) return { documents: [], total: 0 };
+
+  // Fetch all properties in one query
+  const allProps = await db
+    .select()
+    .from(property)
+    .all();
+
+  // Group properties by document ID
+  const propsByDocId = new Map<string, Record<string, string>>();
+  for (const prop of allProps) {
+    if (!propsByDocId.has(prop.documentId)) {
+      propsByDocId.set(prop.documentId, {});
+    }
+    propsByDocId.get(prop.documentId)![prop.key] = prop.value;
+  }
+
+  // Filter and build results for drafts only (no category/collection)
+  const results: DocumentWithProperties[] = [];
+  for (const doc of docs) {
+    const properties = propsByDocId.get(doc.id) || {};
+
+    // Only include documents without category or collection
+    if (!properties.category && !properties.collection) {
+      results.push({
+        id: doc.id,
+        slug: doc.slug,
+        type: doc.type,
+        content: "", // Empty content for list view
+        currentRev: doc.currentRev,
+        publishedRev: doc.publishedRev,
+        properties,
+        createdAt: doc.createdAt,
+        updatedAt: doc.updatedAt,
+        createdBy: doc.createdBy,
+        parentId: doc.parentId || null,
+        readonly: doc.readonly,
+        archived: doc.archived,
+      });
+    }
+  }
+
+  // Apply pagination if provided
+  const total = results.length;
+  if (limit !== undefined && offset !== undefined) {
+    const paginatedResults = results.slice(offset, offset + limit);
+    return { documents: paginatedResults, total };
+  } else if (limit !== undefined) {
+    const paginatedResults = results.slice(0, limit);
+    return { documents: paginatedResults, total };
+  } else if (offset !== undefined) {
+    const paginatedResults = results.slice(offset);
+    return { documents: paginatedResults, total };
+  }
+
+  return { documents: results, total };
+}
+
+export async function countDrafts(
+  spaceId: string,
+): Promise<number> {
+  const db = getSpaceDb(spaceId);
+
+  // Get all document IDs
+  const docs = await db
+    .select({ id: document.id })
+    .from(document)
+    .where(eq(document.archived, false))
+    .all();
+
+  if (docs.length === 0) return 0;
+
+  // Get category/collection properties for all documents
+  const categoryProps = await db
+    .select({
+      documentId: property.documentId,
+      key: property.key,
+      value: property.value,
+    })
+    .from(property)
+    .where(sql`${property.key} IN ('category', 'collection')`)
+    .all();
+
+  // Build set of documents that have a category
+  const docsWithCategory = new Set(categoryProps.map(p => p.documentId));
+
+  // Count documents without category (drafts)
+  return docs.length - docsWithCategory.size;
+}
+
+export async function updateDocumentProperty(
+  spaceId: string,
+  documentId: string,
+  key: string,
+  value: string,
+  type?: string | null,
+  userId?: string,
+) {
+  const db = getSpaceDb(spaceId);
+  const now = new Date();
+
+  const existing = await db
+    .select()
+    .from(property)
+    .where(and(eq(property.documentId, documentId), eq(property.key, key)))
+    .get();
+
+  const previousValue = existing?.value;
+
+  if (existing) {
+    const updateData: { value: string; updatedAt: Date; type?: string | null } = { value, updatedAt: now };
+    if (type !== undefined) {
+      updateData.type = type;
+    }
+    await db
+      .update(property)
+      .set(updateData)
+      .where(eq(property.id, existing.id));
+  } else {
+    await db.insert(property).values({
+      id: crypto.randomUUID(),
+      documentId,
+      key,
+      value,
+      type: type || null,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  // Create audit log for property update
+  await createAuditLog(db, {
+    docId: documentId,
+    userId,
+    event: "property_update",
+    details: {
+      propertyKey: key,
+      propertyType: type || undefined,
+      previousValue,
+      newValue: value,
+    },
+  });
+
+  const payload: { slug?: string } = {};
+
+  // If updating the title, also update the document slug
+  if (key === "title" && value) {
+    const newSlug = await generateUniqueSlug(spaceId, value, documentId);
+    await db
+      .update(document)
+      .set({ slug: newSlug, updatedAt: now })
+      .where(eq(document.id, documentId));
+    payload.slug = newSlug;
+  } else {
+    // Update the document's updatedAt timestamp
+    await db
+      .update(document)
+      .set({ updatedAt: now })
+      .where(eq(document.id, documentId));
+  }
+
+  await updateDocumentFts(spaceId, documentId);
+
+  return payload;
+}
+
+export async function deleteDocumentProperty(
+  spaceId: string,
+  documentId: string,
+  key: string,
+  userId?: string,
+): Promise<void> {
+  const db = getSpaceDb(spaceId);
+  const now = new Date();
+
+  // Get the property value before deletion for audit log
+  const existing = await db
+    .select()
+    .from(property)
+    .where(and(eq(property.documentId, documentId), eq(property.key, key)))
+    .get();
+
+  await db
+    .delete(property)
+    .where(and(eq(property.documentId, documentId), eq(property.key, key)));
+
+  // Create audit log for property deletion
+  if (existing) {
+    await createAuditLog(db, {
+      docId: documentId,
+      userId,
+      event: "property_delete",
+      details: {
+        propertyKey: key,
+        propertyType: existing.type || undefined,
+        previousValue: existing.value,
+      },
+    });
+  }
+
+  // Update the document's updatedAt timestamp
+  await db
+    .update(document)
+    .set({ updatedAt: now })
+    .where(eq(document.id, documentId));
+
+  await updateDocumentFts(spaceId, documentId);
+}
+
+/**
+ * Cache for mention counts
+ * Key format: `${documentId}:${publishedRev}:${userEmail}`
+ */
+const mentionCountCache = new Map<string, number>();
+
+/**
+ * Invalidate mention count cache for a specific document
+ */
+export function invalidateMentionCache(documentId: string) {
+  const keysToDelete: string[] = [];
+  for (const key of mentionCountCache.keys()) {
+    if (key.startsWith(`${documentId}:`)) {
+      keysToDelete.push(key);
+    }
+  }
+  for (const key of keysToDelete) {
+    mentionCountCache.delete(key);
+  }
+}
+
+/**
+ * Clear entire mention count cache
+ */
+export function clearMentionCache() {
+  mentionCountCache.clear();
+}
+
+/**
+ * Get mention cache statistics
+ */
+export function getMentionCacheStats() {
+  return {
+    size: mentionCountCache.size,
+    keys: Array.from(mentionCountCache.keys()),
+  };
+}
+
+/**
+ * Count mentions of a specific user email in a document's published revision
+ * Results are cached in memory to avoid recomputing on every request
+ */
+async function countMentionsForUser(
+  db: ReturnType<typeof drizzle>,
+  documentId: string,
+  userEmail: string,
+): Promise<number> {
+  const doc = await db
+    .select({
+      publishedRev: document.publishedRev,
+    })
+    .from(document)
+    .where(eq(document.id, documentId))
+    .get();
+
+  if (!doc?.publishedRev) {
+    return 0;
+  }
+
+  const cacheKey = `${documentId}:${doc.publishedRev}:${userEmail}`;
+
+  const cached = mentionCountCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const rev = await db
+    .select({
+      snapshot: revision.snapshot,
+    })
+    .from(revision)
+    .where(
+      and(
+        eq(revision.documentId, documentId),
+        eq(revision.rev, doc.publishedRev)
+      )
+    )
+    .get();
+
+  if (!rev?.snapshot) {
+    return 0;
+  }
+
+  try {
+    const html = decompressHtml(rev.snapshot);
+    const mentions = extractMentionsFromHtml(html);
+    const count = mentions.filter(m => m.email === userEmail).length;
+
+    mentionCountCache.set(cacheKey, count);
+
+    return count;
+  } catch (error) {
+    console.error("Failed to count mentions:", error);
+    return 0;
+  }
+}
+
+/**
+ * List all documents in a space, optionally filtered by category
+ * If categorySlug is provided, returns documents in that category plus all their descendants
+ * Returns minimal document fields without content for efficient tree building
+ */
+export async function listAllDocuments(
+  spaceId: string,
+  categorySlug: string,
+  userEmail?: string,
+): Promise<DocumentWithProperties[]> {
+  const db = getSpaceDb(spaceId);
+
+  // Fetch all documents without content
+  const docs = await db
+    .select({
+      id: document.id,
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt,
+      parentId: document.parentId,
+      publishedRev: document.publishedRev,
+      slug: document.slug,
+      type: document.type,
+      currentRev: document.currentRev,
+      createdBy: document.createdBy,
+      readonly: document.readonly,
+      archived: document.archived,
+    })
+    .from(document)
+    .where(eq(document.archived, false))
+    .orderBy(desc(document.updatedAt))
+    .all();
+
+  // Fetch all properties in one query instead of N queries
+  const allProps = await db
+    .select()
+    .from(property)
+    .all();
+
+  // Group properties by document ID
+  const propsByDocId = new Map<string, Record<string, string>>();
+  for (const prop of allProps) {
+    if (!propsByDocId.has(prop.documentId)) {
+      propsByDocId.set(prop.documentId, {});
+    }
+    propsByDocId.get(prop.documentId)![prop.key] = prop.value;
+  }
+
+  // Build results for all documents
+  const results: DocumentWithProperties[] = docs.map(doc => ({
+    id: doc.id,
+    slug: doc.slug,
+    type: doc.type || "document",
+    content: "",
+    currentRev: doc.currentRev,
+    publishedRev: doc.publishedRev,
+    properties: propsByDocId.get(doc.id) || {},
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+    createdBy: doc.createdBy,
+    parentId: doc.parentId || null,
+    readonly: doc.readonly,
+    archived: doc.archived,
+  }));
+
+  // If no category filter, return all documents
+  if (!categorySlug) {
+    return results;
+  }
+
+  // Filter by category: find documents that belong to this category
+  const directCategoryDocs = new Set<string>();
+  for (const doc of results) {
+    const properties = doc.properties;
+    if (properties.category === categorySlug || properties.collection === categorySlug) {
+      directCategoryDocs.add(doc.id);
+    }
+  }
+
+  // Recursively collect all child documents
+  const collectChildren = (parentId: string, collected: Set<string>) => {
+    for (const doc of results) {
+      if (doc.parentId === parentId && !collected.has(doc.id)) {
+        collected.add(doc.id);
+        collectChildren(doc.id, collected);
+      }
+    }
+  };
+
+  // Collect all documents: direct category members + all their descendants
+  const allCategoryDocIds = new Set<string>(directCategoryDocs);
+  for (const docId of directCategoryDocs) {
+    collectChildren(docId, allCategoryDocIds);
+  }
+
+  // Add mention counts if userEmail is provided
+  if (userEmail) {
+    const filteredResults = results.filter(doc => allCategoryDocIds.has(doc.id));
+    await Promise.all(
+      filteredResults.map(async (doc) => {
+        doc.mentionCount = await countMentionsForUser(db, doc.id, userEmail);
+      })
+    );
+    return filteredResults;
+  }
+
+  // Return filtered results
+  return results.filter(doc => allCategoryDocIds.has(doc.id));
+}
+
+export async function setDocumentParent(
+  spaceId: string,
+  documentId: string,
+  parentId: string | null,
+): Promise<void> {
+  const db = getSpaceDb(spaceId);
+  const now = new Date();
+
+  if (parentId === documentId) {
+    throw new Error("Cannot set parent: a child cant be a parent");
+  }
+
+  await db
+    .update(document)
+    .set({ parentId, updatedAt: now })
+    .where(eq(document.id, documentId));
+}
+
+export async function getDocumentChildren(
+  spaceId: string,
+  parentId: string,
+): Promise<DocumentWithProperties[]> {
+  const db = getSpaceDb(spaceId);
+  const docs = await db
+    .select()
+    .from(document)
+    .where(and(eq(document.parentId, parentId), eq(document.archived, false)))
+    .all();
+
+  const results: DocumentWithProperties[] = [];
+
+  for (const doc of docs) {
+    const props = await db
+      .select()
+      .from(property)
+      .where(eq(property.documentId, doc.id))
+      .all();
+
+    const properties: Record<string, string> = {};
+    for (const prop of props) {
+      properties[prop.key] = prop.value;
+    }
+
+    results.push({
+      id: doc.id,
+      slug: doc.slug,
+      type: doc.type,
+      content: doc.content,
+      currentRev: doc.currentRev,
+      publishedRev: doc.publishedRev,
+      properties,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt,
+      createdBy: doc.createdBy,
+      parentId: doc.parentId || null,
+      readonly: doc.readonly,
+      archived: doc.archived,
+    });
+  }
+
+  return results;
+}
+
+export async function searchDocuments(
+  spaceId: string,
+  userId: string,
+  query: string,
+  limit = 20,
+  offset = 0,
+  filters: PropertyFilter[] = [],
+): Promise<{ results: SearchResult[]; total: number }> {
+  const hasQuery = query.trim().length > 0;
+  const hasFilters = filters.length > 0;
+
+  // Need at least a query or filters to search
+  if (!hasQuery && !hasFilters) {
+    return { results: [], total: 0 };
+  }
+
+  const db = getSpaceDb(spaceId);
+  const docIds = await listAccessibleResources(spaceId, userId, ResourceType.DOCUMENT);
+
+  if (docIds.length === 0) {
+    return { results: [], total: 0 };
+  }
+
+  // Helper to check if a document matches property filters
+  const matchesFilters = (properties: Record<string, string>): boolean => {
+    for (const filter of filters) {
+      const propValue = properties[filter.key];
+      if (filter.value === null) {
+        // Filter for "has property" - just check if key exists with any non-empty value
+        if (propValue === undefined || propValue === "") {
+          return false;
+        }
+      } else {
+        // Filter for specific value (case-insensitive)
+        if (propValue === undefined || propValue.toLowerCase() !== filter.value.toLowerCase()) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  let allRawResults: {
+    id: string;
+    content: string;
+    userId: string;
+    parentId: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    rank: number;
+    snippet: string;
+  }[];
+
+  if (hasQuery) {
+    // Sanitize query for FTS5 by removing all operators and special characters
+    // Security: FTS5 operators (AND, OR, NOT, etc.) are word characters, so we must
+    // quote all tokens to prevent operator injection. For example, "test OR password"
+    // would be split into ["test", "OR", "password"] which are all valid tokens.
+    // By quoting each token as "test" OR "OR" OR "password", FTS5 treats "OR" as a
+    // literal string, not an operator.
+    let sanitizedQuery = query.trim().toLowerCase();
+
+    // Handle quoted phrases - keep them intact
+    const quotedPhrases: string[] = [];
+    sanitizedQuery = sanitizedQuery.replace(/"([^"]+)"/g, (_match, phrase) => {
+      quotedPhrases.push(phrase);
+      return `__QUOTED_${quotedPhrases.length - 1}__`;
+    });
+
+    // Split into tokens and clean each
+    const tokens = sanitizedQuery.split(/\s+/).filter(t => t.length > 0);
+    const cleanedTokens = tokens.map(token => {
+      // Restore quoted phrases
+      if (token.startsWith('__QUOTED_')) {
+        const index = Number.parseInt(token.replace('__QUOTED_', '').replace('__', ''));
+        const phrase = quotedPhrases[index];
+        // Remove all non-word characters from phrase for safety
+        const cleaned = phrase.replace(/[^\w\s\-]/g, '');
+        if (!cleaned) return '';
+        // Escape internal double quotes and wrap in quotes for FTS5 phrase matching
+        return `"${cleaned.replace(/"/g, '""')}"`;
+      }
+
+      // Remove all special characters except asterisks (needed for prefix matching in quotes)
+      // This prevents FTS5 operator injection while keeping * for prefix matching
+      token = token.replace(/[^\w*\-]/g, '');
+
+      // Skip empty tokens after cleaning
+      if (!token) return '';
+
+      // Add wildcard for prefix matching if token doesn't have one and is long enough
+      if (!token.endsWith('*') && token.length > 2) {
+        token = token + '*';
+      }
+
+      // Wrap in double quotes to prevent FTS5 operator interpretation
+      // Note: wildcards work inside quotes in FTS5 for prefix matching
+      return `"${token.replace(/"/g, '""')}"`;
+    }).filter(t => t.length > 0);
+
+    // If no valid tokens but we have filters, do filter-only search
+    if (cleanedTokens.length === 0 && !hasFilters) {
+      return { results: [], total: 0 };
+    }
+
+    if (cleanedTokens.length > 0) {
+      // Join with OR for broader matching - all tokens are quoted, so operators are safe
+      const ftsQuery = cleanedTokens.join(' OR ');
+
+      // Query FTS table directly, then join with document table
+      allRawResults = await db.all<{
+        id: string;
+        content: string;
+        userId: string;
+        parentId: string | null;
+        createdAt: Date;
+        updatedAt: Date;
+        rank: number;
+        snippet: string;
+      }>(sql`
+        SELECT
+          d.id,
+          d.content,
+          d.created_by as userId,
+          d.parent_id as parentId,
+          d.created_at as createdAt,
+          d.updated_at as updatedAt,
+          rank,
+          snippet(document_fts, 2, '<mark>', '</mark>', '...', 32) as snippet
+        FROM document_fts
+        JOIN document d ON d.rowid = document_fts.rowid
+        WHERE document_fts MATCH ${ftsQuery}
+        AND (d.archived = 0 OR d.archived = '0' OR d.archived = '0.0' OR d.archived IS NULL OR d.archived = FALSE)
+        ORDER BY rank
+      `);
+    } else {
+      // No valid query tokens, fall through to filter-only
+      allRawResults = [];
+    }
+  } else {
+    // Filter-only search (no text query) - get all non-archived documents
+    allRawResults = await db.all<{
+      id: string;
+      content: string;
+      userId: string;
+      parentId: string | null;
+      createdAt: Date;
+      updatedAt: Date;
+      rank: number;
+      snippet: string;
+    }>(sql`
+      SELECT
+        d.id,
+        d.content,
+        d.created_by as userId,
+        d.parent_id as parentId,
+        d.created_at as createdAt,
+        d.updated_at as updatedAt,
+        0 as rank,
+        substr(d.content, 1, 200) as snippet
+      FROM document d
+      WHERE (d.archived = 0 OR d.archived = '0' OR d.archived = '0.0' OR d.archived IS NULL OR d.archived = FALSE)
+      ORDER BY d.updated_at DESC
+    `);
+  }
+
+  // Filter by accessible IDs
+  let accessibleResults = allRawResults.filter(r => docIds.includes(r.id));
+
+  // If we have filters, apply them by loading properties for each document
+  if (hasFilters && accessibleResults.length > 0) {
+    const filteredResults: typeof accessibleResults = [];
+
+    for (const row of accessibleResults) {
+      const props = await db
+        .select()
+        .from(property)
+        .where(eq(property.documentId, row.id))
+        .all();
+
+      const properties: Record<string, string> = {};
+      for (const prop of props) {
+        properties[prop.key] = prop.value;
+      }
+
+      if (matchesFilters(properties)) {
+        filteredResults.push(row);
+      }
+    }
+
+    accessibleResults = filteredResults;
+  }
+
+  const total = accessibleResults.length;
+
+  if (total === 0) {
+    return { results: [], total: 0 };
+  }
+
+  // Apply pagination
+  const rawResults = accessibleResults.slice(offset, offset + limit);
+
+  const results: SearchResult[] = [];
+
+  for (const row of rawResults) {
+    const props = await db
+      .select()
+      .from(property)
+      .where(eq(property.documentId, row.id))
+      .all();
+
+    const properties: Record<string, string> = {};
+    for (const prop of props) {
+      properties[prop.key] = prop.value;
+    }
+
+    const doc = await db.select().from(document).where(eq(document.id, row.id)).get();
+
+    results.push({
+      id: row.id,
+      slug: doc?.slug || "",
+      type: doc?.type,
+      content: row.content,
+      currentRev: doc?.currentRev || 0,
+      publishedRev: doc?.publishedRev || null,
+      properties,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      createdBy: row.userId,
+      parentId: doc?.parentId || null,
+      rank: row.rank,
+      snippet: row.snippet,
+      readonly: doc?.readonly || false,
+      archived: doc?.archived || false,
+    });
+  }
+
+  return { results, total };
+}
+
+export async function rebuildSearchIndex(spaceId: string): Promise<void> {
+  const db = getSpaceDb(spaceId);
+
+  await db.run(sql`DELETE FROM document_fts`);
+
+  const docs = await db.select().from(document).all();
+
+  for (const doc of docs) {
+    const props = await db
+      .select()
+      .from(property)
+      .where(eq(property.documentId, doc.id))
+      .all();
+
+    const titleProp = props.find((p) => p.key === "title");
+    const propsText = props.map((p) => `${p.key}: ${p.value}`).join(" ");
+
+    await db.run(sql`
+			INSERT INTO document_fts(rowid, title, properties, content)
+			VALUES (
+				(SELECT rowid FROM document WHERE id = ${doc.id}),
+				${titleProp?.value || ""},
+				${propsText},
+				${doc.content}
+			)
+		`);
+  }
+}
+
+export interface PropertyInfo {
+  name: string;
+  type: string | null;
+  values: string[];
+}
+
+export async function getAllPropertiesWithValues(
+  spaceId: string,
+): Promise<PropertyInfo[]> {
+  const db = getSpaceDb(spaceId);
+
+  const allProperties = await db
+    .select()
+    .from(property)
+    .all();
+
+  const propertyMap: Record<string, { type: string | null; values: Set<string> }> = {};
+
+  for (const prop of allProperties) {
+    if (!propertyMap[prop.key]) {
+      propertyMap[prop.key] = {
+        type: prop.type || null,
+        values: new Set(),
+      };
+    }
+    propertyMap[prop.key].values.add(prop.value);
+    if (prop.type && !propertyMap[prop.key].type) {
+      propertyMap[prop.key].type = prop.type;
+    }
+  }
+
+  const result: PropertyInfo[] = [];
+  for (const [key, data] of Object.entries(propertyMap)) {
+    result.push({
+      name: key,
+      type: data.type,
+      values: Array.from(data.values).sort(),
+    });
+  }
+
+  return result.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export interface BreadcrumbItem {
+  id: string;
+  slug: string;
+  title: string;
+}
+
+export async function getDocumentBreadcrumbs(
+  spaceId: string,
+  documentId: string,
+): Promise<BreadcrumbItem[]> {
+  const db = getSpaceDb(spaceId);
+  const breadcrumbs: BreadcrumbItem[] = [];
+
+  let currentId: string | null = documentId;
+  const visited = new Set<string>();
+
+  while (currentId) {
+    if (visited.has(currentId)) {
+      break;
+    }
+    visited.add(currentId);
+
+    const doc = await db
+      .select({
+        id: document.id,
+        slug: document.slug,
+        parentId: document.parentId,
+      })
+      .from(document)
+      .where(eq(document.id, currentId))
+      .get();
+
+    if (!doc) {
+      break;
+    }
+
+    const props = await db
+      .select()
+      .from(property)
+      .where(and(eq(property.documentId, doc.id), eq(property.key, "title")))
+      .get();
+
+    breadcrumbs.unshift({
+      id: doc.id,
+      slug: doc.slug,
+      title: props?.value || "Untitled",
+    });
+
+    currentId = doc.parentId;
+  }
+
+  return breadcrumbs;
+}

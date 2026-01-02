@@ -1,0 +1,29 @@
+---
+import FirstSpacePrompt from "../components/FirstSpacePrompt.vue";
+import { config } from "../config";
+import { listUserSpaces, getSpaceBySlug } from "../db/spaces.ts";
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+if (!Astro.locals.session) {
+  return Astro.redirect("/login");
+}
+
+const appConfig = config();
+
+const defaultSpace = appConfig.DEFAULT_SPACE ? await getSpaceBySlug(appConfig.DEFAULT_SPACE) : null;
+
+if(defaultSpace) {
+  return Astro.redirect(`/${defaultSpace.slug}`);
+}
+
+const userSpaces = await listUserSpaces(Astro.locals.user!.id);
+
+if (userSpaces.length !== 0) {
+  return Astro.redirect(`/${userSpaces[0].slug}`);
+}
+---
+
+<BaseLayout>
+  <!-- First Space Onboarding Prompt -->
+  <FirstSpacePrompt client:only="vue" />
+</BaseLayout>

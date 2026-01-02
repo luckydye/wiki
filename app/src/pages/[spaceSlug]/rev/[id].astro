@@ -1,0 +1,59 @@
+---
+import { eq } from "drizzle-orm";
+import { getSpaceDb } from "../../../db/db";
+import { revision, document } from "../../../db/schema";
+import { getSpaceBySlug } from "../../../db/spaces";
+
+const { spaceSlug, id } = Astro.params;
+
+if (!spaceSlug || !id) {
+  return new Response(null, {
+    status: 404,
+    statusText: "Not found",
+  });
+}
+
+const space = await getSpaceBySlug(spaceSlug);
+
+if (!space) {
+  return new Response(null, {
+    status: 404,
+    statusText: "Space not found",
+  });
+}
+
+const db = getSpaceDb(space.id);
+
+// Find the revision by its UUID
+const rev = await db
+  .select({
+    rev: revision.rev,
+    documentId: revision.documentId,
+  })
+  .from(revision)
+  .where(eq(revision.id, id))
+  .get();
+
+if (!rev) {
+  return new Response(null, {
+    status: 404,
+    statusText: "Revision not found",
+  });
+}
+
+// Get the document slug
+const doc = await db
+  .select({ slug: document.slug })
+  .from(document)
+  .where(eq(document.id, rev.documentId))
+  .get();
+
+if (!doc) {
+  return new Response(null, {
+    status: 404,
+    statusText: "Document not found",
+  });
+}
+
+return Astro.redirect(`/${spaceSlug}/doc/${doc.slug}?revision=${rev.rev}`);
+---

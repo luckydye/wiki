@@ -1,0 +1,233 @@
+---
+import SpaceLayout from "../../../layouts/SpaceLayout.astro";
+import DocumentContent from "../../../components/DocumentContent.vue";
+import RevisionsSidebar from "../../../components/RevisionsSidebar.vue";
+import { hasPermission, ResourceType, getUserGroups } from "../../../db/acl.ts";
+import {
+  getDocumentBySlug,
+  getDocumentBreadcrumbs,
+  getDocument,
+} from "../../../db/documents.ts";
+import { getPublishedContent } from "../../../db/revisions.ts";
+import { getSpaceBySlug } from "../../../db/spaces.ts";
+import { getCategoryBySlug } from "../../../db/categories.ts";
+import CommentManager from "../../../components/CommentManager.vue";
+import docStyles from "../../../styles/document.css?inline";
+import Canvas from "~/src/canvas/Canvas.vue";
+import Breadcrumbs from "~/src/components/Breadcrumbs.vue";
+import { twMerge } from "tailwind-merge";
+import DocumentActions from "../../../components/DocumentActions.vue";
+import DocumentProperties from "../../../components/DocumentProperties.vue";
+import TitleEditor from "../../../components/TitleEditor.vue";
+import RestoreButton from "../../../components/RestoreButton.vue";
+
+const { spaceSlug, slug } = Astro.params;
+
+if (!spaceSlug || !slug) {
+  return Astro.redirect("/");
+}
+
+const space = await getSpaceBySlug(spaceSlug);
+
+if (!space) {
+  return new Response(null, {
+    status: 404,
+    statusText: "Space not found",
+  });
+}
+
+const document = await getDocumentBySlug(space.id, slug);
+
+if (!document) {
+  const doc = await getDocument(space.id, slug);
+  if (doc) {
+    return Astro.redirect(`/${space.slug}/doc/${doc?.slug}`);
+  }
+
+  return new Response(null, {
+    status: 404,
+    statusText: "Document not found",
+  });
+}
+
+// Check ACL permissions - allow unauthenticated users for public documents
+const userId = Astro.locals.user?.id || null;
+const userGroups = userId ? await getUserGroups(userId) : ["public"];
+
+const hasAccess = await hasPermission(
+  space.id,
+  ResourceType.DOCUMENT,
+  document.id,
+  userId || "",
+  "viewer",
+  userGroups,
+);
+
+if (!hasAccess) {
+  // If not authenticated and no public access, redirect to login
+  if (!Astro.locals.session) {
+    return Astro.redirect("/login");
+  }
+
+  return new Response(null, {
+    status: 403,
+    statusText: "Forbidden",
+  });
+}
+
+const title = document.properties.title || "Untitled Document";
+
+// Archived documents should be treated as readonly
+const isReadonly = document.readonly || document.archived || document.type === "canvas";
+
+let htmlContent = document.content;
+if (document.publishedRev !== null) {
+  const publishedContent = await getPublishedContent(space.id, document.id);
+  if (publishedContent) {
+    htmlContent = publishedContent;
+  }
+}
+
+// Get breadcrumb data
+const breadcrumbs = await getDocumentBreadcrumbs(space.id, document.id);
+// Remove the current document from breadcrumbs (it's shown separately)
+const parentBreadcrumbs = breadcrumbs.slice(0, -1);
+
+// Get category if it exists
+let category = null;
+const categorySlug = document.properties.category;
+if (categorySlug) {
+  category = await getCategoryBySlug(space.id, categorySlug);
+}
+
+const now = new Date();
+
+let updatedAtStr = "just now";
+
+const diffMs = now.getTime() - document.updatedAt?.getTime();
+const diffMins = Math.floor(diffMs / 60000);
+const diffHours = Math.floor(diffMs / 3600000);
+const diffDays = Math.floor(diffMs / 86400000);
+
+if (diffMins >= 1 && diffMins < 60) {
+  updatedAtStr = `${diffMins} minute${diffMins !== 1 ? "s" : ""} ago`;
+} else if (diffHours >= 1 && diffHours < 24) {
+  updatedAtStr = `${diffHours} hour${diffHours !== 1 ? "s" : ""} ago`;
+} else if (diffDays >= 1) {
+  updatedAtStr = `${diffDays} day${diffDays !== 1 ? "s" : ""} ago`;
+}
+---
+
+<SpaceLayout title={`${title} - ${space.name} - Wiki`} meta={{
+  title: `${title}`,
+  description: document.properties.description || '',
+}}>
+    <div
+      data-type={document.type}
+      data-updated-at={document.updatedAt}
+      data-created-at={document.createdAt}
+      class={twMerge(
+        "space-y-6 mx-auto h-full flex flex-col"
+      )}
+     >
+      <!-- Archived Document Disclaimer -->
+      {document.archived && (
+        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mx-4 lg:mx-10">
+          <div class="flex items-start justify-between gap-3">
+            <div class="space-y-2">
+              <div class="text-yellow-600 font-semibold text-sm">
+                ⚠️ This document is archived
+              </div>
+              <p class="text-yellow-700 text-sm">
+                This document has been archived and is no longer actively maintained. You can view it here, but it may be out of date.
+              </p>
+            </div>
+            <RestoreButton client:load documentId={document.id} />
+          </div>
+        </div>
+      )}
+
+      <!-- Document Header -->
+      <div class={twMerge(
+        document.type === 'canvas' ? 'absolute top-xs right-0 left-0 lg:left-(--sidebar-width) z-10' : 'pt-s mb-xl'
+      )}>
+        <div class="print:px-0 px-xs lg:px-xl">
+            <Breadcrumbs
+                spaceSlug={spaceSlug!}
+                category={category}
+                parents={parentBreadcrumbs}
+                currentTitle={title}
+            />
+        </div>
+
+        <div class="flex gap-6 lg:gap-4 justify-between flex-col-reverse lg:flex-row print:px-0 px-xs lg:px-xl mt-xl">
+          <div>
+            <div class="flex items-start justify-between">
+              <TitleEditor client:load initialEditMode={false} title={title} documentId={document.id} />
+            </div>
+
+            {document.updatedAt ? (
+                <div class="mt-4xs flex flex-wrap items-center gap-2 text-sm text-neutral-500">
+                    {updatedAtStr && <span>Updated {updatedAtStr}</span>}
+                </div>
+            ) : null}
+          </div>
+
+          <DocumentActions documentId={document.id} title={title} readonly={isReadonly} client:load />
+        </div>
+
+        <div class="print:px-0 px-xs lg:px-xl mt-xs">
+          <DocumentProperties client:load documentId={document.id} initialProperties={{ ...document.properties, parentId: document.parentId }} />
+        </div>
+      </div>
+
+      <!-- Main Content -->
+      <div
+        class={twMerge(
+          'max-w-none text-neutral-700 h-full',
+          document.type !== 'canvas' && "pb-20 print:px-0 px-xs lg:px-xl"
+        )}
+      >
+          <DocumentContent
+         		client:load
+         		documentId={document.id}
+         		spaceId={space.id}
+         		documentType={document.type ?? "document"}
+         		readonly={isReadonly}
+         		initialEditMode={false}
+         	/>
+
+         	<div>
+         	    <editor-content></editor-content>
+         	</div>
+
+         	<main class="h-full relative">
+                 <CommentManager client:only="vue" spaceId={space.id} documentId={document.id} currentRev={document.currentRev} />
+
+                 {document.type === "canvas" ? (
+              			<Canvas
+                             client:only="vue"
+                            	documentId={document.id}
+                             spaceId={space.id}
+              			/>
+                	) : (
+                     <document-view>
+                         <template shadowrootmode="open">
+                             <style set:html={docStyles}></style>
+                             <div part="content">
+                                 <div set:html={htmlContent}></div>
+                             </div>
+                         </template>
+                  	  </document-view>
+                 )}
+
+                 <div><!-- DON'T REMOVE; This fixes shadowDOM content not visible in print preview --></div>
+         	</main>
+      </div>
+    </div>
+
+   	<!-- Revisions Sidebar -->
+    <div slot="outer">
+        <RevisionsSidebar client:only documentId={document.id} />
+    </div>
+</SpaceLayout>

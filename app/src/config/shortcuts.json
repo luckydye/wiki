@@ -1,0 +1,6 @@
+{
+  "ctrl+k": "ui:toggle:palatte",
+  "ctrl+e": "document:edit",
+  "ctrl+s": "document:save",
+  "ctrl+b": "ui:toggle:sidebar"
+}

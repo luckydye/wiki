@@ -1,0 +1,109 @@
+---
+import SpaceActivity from "../../components/SpaceActivity.vue";
+import ExtensionView from "../../components/ExtensionView.vue";
+import { hasPermission, ResourceType, getUserGroups } from "../../db/acl.ts";
+import { listCategories } from "../../db/categories.ts";
+import { getDocument, countDocuments } from "../../db/documents.ts";
+import { getSpaceBySlug } from "../../db/spaces.ts";
+import { listExtensions } from "../../db/extensions.ts";
+import SpaceLayout from "../../layouts/SpaceLayout.astro";
+import Categories from "~/src/components/Categories.vue";
+
+if (!Astro.locals.session) {
+  return Astro.redirect("/login");
+}
+
+const { spaceSlug } = Astro.params;
+
+if (!spaceSlug) {
+  return Astro.redirect("/");
+}
+
+const space = await getSpaceBySlug(spaceSlug);
+
+if (!space) {
+  return new Response(null, {
+    status: 404,
+    statusText: "Space not found",
+  });
+}
+
+// Check ACL permissions - user must be a member of the space
+const userGroups = await getUserGroups(Astro.locals.user!.id);
+const hasAccess = await hasPermission(
+  space.id,
+  ResourceType.SPACE,
+  space.id,
+  Astro.locals.user!.id,
+  "viewer",
+  userGroups,
+);
+
+if (!hasAccess) {
+  return new Response(null, {
+    status: 403,
+    statusText: "Forbidden",
+  });
+}
+
+const categories = await listCategories(space.id);
+const documentCount = await countDocuments(space.id);
+
+const document = await getDocument(space.id, space.id);
+
+// Get extension views for home page placements
+const extensions = await listExtensions(space.id);
+const homeTopViews = extensions.flatMap(ext =>
+  (ext.manifest.routes || [])
+    .filter(route => route.placements?.includes("home-top"))
+    .map(route => ({ extensionId: ext.id, route }))
+);
+---
+
+<SpaceLayout title={`Categories - ${space.name} - Wiki`}>
+	<div class="space-y-6 mx-auto pt-m pb-20 lg:pb-8 overflow-hidden h-full print:px-0 px-xs lg:px-xl">
+
+		{homeTopViews.length > 0 && (
+			<div class="space-y-4 mb-20">
+				{homeTopViews.map(({ extensionId, route }) => (
+					<div>
+						{(route.title || route.description) && (
+							<div class="mb-3">
+								{route.title && <h3 class="text-lg font-semibold">{route.title}</h3>}
+								{route.description && <p class="text-sm text-neutral-600 mt-1">{route.description}</p>}
+							</div>
+						)}
+						<ExtensionView client:only extensionId={extensionId} routePath={route.path} spaceId={space.id} />
+					</div>
+				))}
+			</div>
+		)}
+
+		<div class="grid grid-cols-1 lg:grid-cols-2 gap-3xl mb-20">
+			<div>
+				<div class="mb-4">
+					<h1 class="text-2xl font-bold">Categories</h1>
+					<p class="mt-2 text-sm">
+						Organize your documents with categories
+					</p>
+				</div>
+
+				<Categories client:load spaceSlug={space.slug} spaceId={space.id} />
+			</div>
+
+			<div>
+				<SpaceActivity client:load spaceId={space.id} limit={15} />
+			</div>
+		</div>
+
+		{categories.length > 0 && (
+			<div class="pt-4 border-t border-neutral-200">
+				<div class="flex items-center justify-between text-sm">
+					<span class="text-neutral-600">
+						{categories.length} {categories.length === 1 ? 'category' : 'categories'} • {documentCount} total {documentCount === 1 ? 'document' : 'documents'}
+					</span>
+				</div>
+			</div>
+		)}
+	</div>
+</SpaceLayout>

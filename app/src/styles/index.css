@@ -1,0 +1,30 @@
+@import '@fontsource-variable/ibm-plex-sans';
+
+@import "tailwindcss";
+@import "./theme.css";
+@import "./utils.css";
+@import "./elements.css";
+@import "./print.css";
+@import "./canvas.css";
+
+:root {
+  --sidebar-width: 18rem;
+  --site-width: 1600px;
+}
+
+body {
+  height: 100vh;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+
+  background: var(--color-background);
+  color: var(--color-forground);
+}
+
+.main-content {
+  font-size: var(--content-text-size, 1.125rem);
+}
+
+hr {
+  color: var(--color-neutral-100);
+}

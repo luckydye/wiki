@@ -1,0 +1,67 @@
+import { existsSync, mkdirSync } from "node:fs";
+import path, { join } from "node:path";
+import { drizzle } from "drizzle-orm/libsql";
+import * as schema from "./schema.ts";
+import { prepateAuthDb, prepareSpaceDb } from "./init.ts";
+
+const DATA_DIR = "./data";
+const AUTH_DB_PATH = join(DATA_DIR, "auth.db");
+
+if (!existsSync(DATA_DIR)) {
+  mkdirSync(DATA_DIR, { recursive: true });
+}
+
+const authDb = drizzle({
+  connection: {
+    url: `file:${path.resolve(AUTH_DB_PATH)}`,
+  },
+});
+
+console.log("Initializing databases...");
+prepateAuthDb(authDb);
+console.log("Done! Auth database is ready.");
+console.log("Space databases will be created automatically when spaces are created.");
+
+export function getAuthDb() {
+  return authDb;
+}
+
+const spaceDbCache = new Map<string, ReturnType<typeof drizzle>>();
+
+export function getSpaceDb(spaceId: string) {
+  const cached = spaceDbCache.get(spaceId);
+  if (cached) {
+    return cached;
+  }
+
+  // create missing tables if not exist
+  prepareSpaceDb(spaceId);
+
+  const spaceDir = join(DATA_DIR, "spaces");
+
+  if (!existsSync(spaceDir)) {
+    mkdirSync(spaceDir, { recursive: true });
+  }
+
+  const spaceDb = drizzle({
+    connection: {
+      url: `file:${path.resolve(spaceDir, `${spaceId}.db`)}`,
+    },
+  });
+
+  spaceDbCache.set(spaceId, spaceDb);
+
+  return spaceDb;
+}
+
+export function closeSpaceDb(spaceId: string) {
+  if (spaceDbCache.has(spaceId)) {
+    spaceDbCache.delete(spaceId);
+  }
+}
+
+export function clearSpaceDbCache() {
+  spaceDbCache.clear();
+}
+
+export { schema };

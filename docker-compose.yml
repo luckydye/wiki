@@ -1,0 +1,12 @@
+services:
+  wiki:
+    build: .
+    env_file: .env.prod
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    volumes:
+      - wiki_data:/app/app/data
+
+volumes:
+  wiki_data:

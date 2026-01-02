@@ -1,0 +1,46 @@
+---
+import SearchComponent from "../../components/Search.vue";
+import { getPermission, ResourceType, getUserGroups } from "../../db/acl.ts";
+import { getSpaceBySlug } from "../../db/spaces.ts";
+import SpaceLayout from "../../layouts/SpaceLayout.astro";
+
+if (!Astro.locals.session) {
+  return Astro.redirect("/login");
+}
+
+const { spaceSlug } = Astro.params;
+
+if (!spaceSlug) {
+  return Astro.redirect("/");
+}
+
+const space = await getSpaceBySlug(spaceSlug);
+
+if (!space) {
+  return new Response(null, {
+    status: 404,
+    statusText: "Space not found",
+  });
+}
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect("/login");
+}
+
+const userGroups = await getUserGroups(user.id);
+const permission = await getPermission(space.id, ResourceType.SPACE, space.id, user.id, userGroups);
+
+if (!permission) {
+  return new Response(null, {
+    status: 403,
+    statusText: "Forbidden",
+  });
+}
+---
+
+<SpaceLayout title={`Search - ${space.name} - Wiki`}>
+  <div class="mx-auto pt-m pb-20 lg:pb-8 overflow-hidden h-full print:px-0 px-xs lg:px-xl">
+    <SearchComponent client:load spaceId={space.id} spaceSlug={space.slug} />
+  </div>
+</SpaceLayout>

@@ -1,0 +1,15 @@
+.column-content,
+div[data-type="column-layout"] {
+  @apply flex flex-wrap md:flex-row flex-col gap-xs w-full;
+}
+
+div[data-type="column-item"] {
+  flex: 1;
+  min-width: 0;
+}
+
+div[data-type="column-item"]:focus-within {
+  border-color: #3b82f6;
+  outline: 2px solid #93c5fd;
+  outline-offset: 1px;
+}
