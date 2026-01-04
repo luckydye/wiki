@@ -194,6 +194,13 @@ Actions.mapShortcut("meta+shift+f", "find:open");
         >
             <a-shortcut class="ml-6 flex-none @max-xs:hidden!" data-shortcut="cmd-shift-f"></a-shortcut>
         </MenuLink>
+        <MenuLink
+            v-if="userCanEdit"
+            :icon="folderIcon"
+            text="Archive"
+            :href="`/${spaceSlug}/archive`"
+            :is-active="activeRoute === 'archive'"
+        />
     </div>
 
     <!-- Extension Menu Links -->
@@ -209,7 +216,7 @@ Actions.mapShortcut("meta+shift+f", "find:open");
     </div>
 
     <!-- Document Tree -->
-    <div class="@max-xs:invisible flex-1 px-5xs py-m">
+    <div class="@max-xs:invisible px-5xs py-m">
       <div v-if="isLoading" class="px-2 space-y-1 hidden lg:flex flex-col">
         <!-- Category skeleton -->
         <div v-for="i in 3" :key="`cat-skeleton-${i}`" class="space-y-1">
@@ -233,18 +240,8 @@ Actions.mapShortcut("meta+shift+f", "find:open");
     </div>
 
     <!-- External Connections -->
-    <div class="px-3xs flex-none mt-20 @max-xs:invisible min-h-30">
+    <div v-if="!isLoading" class="px-3xs flex-none @max-xs:invisible min-h-30">
       <ExternalConnections />
-    </div>
-
-    <div class="px-3xs flex-none hidden lg:flex flex-col gap-1.5 pt-10">
-        <MenuLink
-            v-if="userCanEdit"
-            :icon="folderIcon"
-            text="Archive"
-            :href="`/${spaceSlug}/archive`"
-            :is-active="activeRoute === 'archive'"
-        />
     </div>
   </nav>
 </template>

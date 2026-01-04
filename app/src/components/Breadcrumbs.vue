@@ -37,7 +37,7 @@ const showBreadcrumbs = computed(() => props.category || props.parents.length > 
       <li v-if="category" class="flex items-center gap-1.5">
         <a
           :href="`/${spaceSlug}?category=${category.slug}`"
-          class="inline-flex items-center gap-1.5 hover:text-neutral-900 hover:underline transition-colors px-1"
+          class="inline-flex items-center gap-1.5 hover:text-neutral-900 hover:underline transition-colors"
         >
           <span v-if="category.icon" class="text-base">{{ category.icon }}</span>
           <span>{{ category.name }}</span>

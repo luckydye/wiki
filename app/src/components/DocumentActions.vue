@@ -142,6 +142,7 @@ function cancelEditing() {
 
 function handleEditorReady(event: CustomEvent<{ saveFunction: () => Promise<void> }>) {
   editorSaveFunction.value = event.detail.saveFunction;
+  isEditing.value = true;
 }
 
 onMounted(async () => {
