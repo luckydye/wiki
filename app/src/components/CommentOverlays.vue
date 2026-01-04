@@ -126,7 +126,7 @@ onUnmounted(() => {
     <button
       v-if="floatingBubble"
       @click.stop="handleBubbleClick"
-      class="absolute right-0 pointer-events-auto
+      class="absolute right-0 pointer-events-auto cursor-pointer
               flex items-center justify-center border border-neutral-200 w-[38px] h-[38px] rounded-full
               bg-primary-600 hover:bg-primary-700 text-white shadow-lg
               transition-none z-10"
@@ -141,7 +141,7 @@ onUnmounted(() => {
     <template v-for="overlay in overlays" :key="overlay.reference">
       <button
         @click.stop="openSidebar(overlay.reference)"
-        class="absolute right-0 pointer-events-auto
+        class="absolute right-0 pointer-events-auto cursor-pointer
                flex items-center justify-center min-w-[40px] h-[40px] px-1.5 rounded-full
                bg-primary-200 border border-neutral-200
                hover:border-primary-300 hover:ring-2 hover:ring-primary-100 hover:text-primary-600

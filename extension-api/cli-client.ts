@@ -2,16 +2,48 @@
 
 import { ApiClient } from "../app/src/api/ApiClient.ts";
 
-// curl -X PUT https://wiki.luckydye.de/api/v1/spaces/a6b43eab-d7fe-4656-b52d-dc1ac0db6deb/documents/73738c7b-cabe-4d21-8698-0e40cf8fb41b \
-//     -H "Content-Type: application/json" \
-//     -H "Authorization: Bearer at_c85d7d9c338a4a9d77de12096097af25be19a8900ca96b0562b75b7a696282ff" \
-//     -d '{"content": "<html>Your content here</html>"}'
+const HOST = process.env.WIKI_HOST;
+
+if (!HOST) {
+  throw new Error("WIKI_HOST environment variable is not set");
+}
 
 const api = new ApiClient({
-  baseUrl: "http://127.0.0.1:4321",
-  accessToken: "at_8797c0238342463f6e8de3a1280d0ca8c55e86f617fee6090dfe2aadf2fd6f2f"
+  baseUrl: HOST,
+  accessToken: process.env.WIKI_ACCESS_TOKEN,
 });
 
-const spaceId = "60a2dab1-3820-463d-8c63-2a804772810e";
+const spaceId = process.env.WIKI_SPACEID;
+if (!spaceId) {
+  throw new Error("WIKI_SPACEID environment variable is not set");
+}
 
-console.log(await api.documents.get(spaceId));
+const args = process.argv.slice(2);
+
+const commands: Record<string, {
+  description: string;
+  execute: (args: string[]) => Promise<void>;
+}> = {
+  cat: {
+    description: "Print document content to stdout",
+    execute: async ([docId]) => {
+      if (!docId) {
+        throw new Error("Document ID is required");
+      }
+      const doc = await api.document.get(spaceId, docId);
+      process.stdout.write(doc.content);
+    }
+  }
+};
+
+const command = commands[args[0] || ''];
+
+if (command) {
+  command.execute(args.slice(1));
+} else {
+  console.log(`Command not found "${args[0]}"`);
+  console.log("Available commands:");
+  for (const [name, cmd] of Object.entries(commands)) {
+    console.log(`  ${name}: ${cmd.description}`);
+  }
+}

@@ -72,7 +72,7 @@ onUnmounted(() => {
 
     <div
       v-if="activeReference"
-      class="absolute right-0 z-40 pr-4"
+      class="absolute right-0 z-40"
       :style="{ top: `${threadPosition}px` }"
     >
       <CommentThread
