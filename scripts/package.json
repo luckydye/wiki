@@ -1,0 +1,8 @@
+{
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "web-tree-sitter": "^0.26.3"
+  }
+}
