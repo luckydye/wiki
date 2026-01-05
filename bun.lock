@@ -13,7 +13,6 @@
       "dependencies": {
         "@astrojs/node": "^9.5.0",
         "@astrojs/vue": "^5.1.1",
-        "@fontsource-variable/ibm-plex-sans": "^5.2.8",
         "@hocuspocus/provider": "^3.3.0",
         "@hocuspocus/server": "^3.3.0",
         "@hocuspocus/transformer": "^3.4.0",
@@ -250,8 +249,6 @@
     "@floating-ui/dom": ["@floating-ui/dom@1.7.4", "", { "dependencies": { "@floating-ui/core": "^1.7.3", "@floating-ui/utils": "^0.2.10" } }, "sha512-OOchDgh4F2CchOX94cRVqhvy7b3AFb+/rQXyswmzmGakRfkMgoWVjfnLWkRirfLEfuD4ysVW16eXzwt3jHIzKA=="],
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.10", "", {}, "sha512-aGTxbpbg8/b5JfU1HXSrbH3wXZuLPJcNEcZQFMxLs3oSzgtVu6nFPkbbGGUvBcUjKV2YyB9Wxxabo+HEH9tcRQ=="],
-
-    "@fontsource-variable/ibm-plex-sans": ["@fontsource-variable/ibm-plex-sans@5.2.8", "", {}, "sha512-n5PF2iFa0CZT0QYTPzxvZ39opC9LnU0zdoRccoADbs+Dtsd+lbXOZF7RNuIPHcQX1dKjF63sxnRImQIB5eD0Ag=="],
 
     "@hocuspocus/common": ["@hocuspocus/common@3.4.1", "", { "dependencies": { "lib0": "^0.2.87" } }, "sha512-29Dpa3nslBvM4dksIoskovYt/aecJomEeWE5Wmzr+lNFJje15P/L/47WcogguRd/IqYIu2auNTyKlouvSRrDAQ=="],
 

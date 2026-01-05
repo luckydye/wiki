@@ -5,7 +5,6 @@
 	"dependencies": {
 		"@astrojs/node": "^9.5.0",
 		"@astrojs/vue": "^5.1.1",
-		"@fontsource-variable/ibm-plex-sans": "^5.2.8",
 		"@hocuspocus/provider": "^3.3.0",
 		"@hocuspocus/server": "^3.3.0",
 		"@hocuspocus/transformer": "^3.4.0",
