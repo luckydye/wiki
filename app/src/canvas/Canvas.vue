@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import "@wiki/canvas/src/components/CanvasElement.ts";
-import type CanvasElement from "@wiki/canvas/src/components/CanvasElement.ts";
+import "./components/CanvasElement.ts";
+import type CanvasElement from "./components/CanvasElement.ts";
 import { onMounted, ref } from "vue";
 import { createYProvider } from "../utils/sync";
 import { useDocument } from "../composeables/useDocument";

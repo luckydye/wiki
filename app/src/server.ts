@@ -10,7 +10,7 @@ import { TiptapTransformer } from "@hocuspocus/transformer";
 import { contentExtensions } from "./editor/extensions.ts";
 import { generateJSON } from '@tiptap/html'
 import * as Y from "yjs";
-import { Canvas } from "../../canvas/src/Canvas.ts";
+import { Canvas } from "./canvas/Canvas.ts";
 
 const hocuspocus = new Hocuspocus({
   async onAuthenticate(data) {

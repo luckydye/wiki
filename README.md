@@ -1,8 +1,7 @@
 # wiki
 
-This is a proof-of-concept enterprise grade project documentation tool.
+This is a proof-of-concept enterprise grade project documentation tool based on text documents, with minimal dependencies.
 
-A simple unopinionated wiki application based on HTML documents stored in an SQLite database.
 Supports multiple spaces, space personalization, and real-time collaboration within the powerful and customizable [tiptap](https://tiptap.dev/) editor.
 Authenticate over generic OAuth2 or implement your own authentication system with [better-auth](https://www.better-auth.com/).
 
@@ -26,6 +25,7 @@ Authenticate over generic OAuth2 or implement your own authentication system wit
 - Full-text search
 
 **Possible Extensions**
+
 - Kanban Board
 - Games
 - External data dashboards

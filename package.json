@@ -5,7 +5,6 @@
 	},
 	"workspaces": [
 		"extension-api",
-		"app",
-		"canvas"
+		"app"
 	]
 }
