@@ -44,6 +44,8 @@ import {
   headingIcon,
   undoIcon,
   redoIcon,
+  indentIcon,
+  outdentIcon,
 } from "../assets/icons.ts";
 
 const icons = {
@@ -92,6 +94,8 @@ const icons = {
   heading: headingIcon,
   undo: undoIcon,
   redo: redoIcon,
+  indent: indentIcon,
+  outdent: outdentIcon,
 };
 
 const props = defineProps<{

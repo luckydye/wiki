@@ -1,6 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import Icon from "./Icon.vue";
+import { Actions } from "../utils/actions";
+import { registerFormattingActions, unregisterFormattingActions } from "../utils/formattingActions";
 import {
   toggleImageFullWidth,
   resetImageSize,
@@ -20,6 +22,7 @@ const textColorInput = ref(null);
 const bgColorInput = ref(null);
 const cellBgColorInput = ref(null);
 const isInteractingWithMenu = ref(false);
+const isEditMode = ref(false);
 const isInTable = ref(false);
 const cellBackgroundColor = ref("transparent");
 const copiedRow = ref(null);
@@ -45,9 +48,9 @@ function updateCurrentHeadingLevel() {
 
 function setHeading(level) {
   if (level === 0) {
-    getEditor().chain().focus().setParagraph().run();
+    Actions.run("format:heading:paragraph");
   } else {
-    getEditor().chain().focus().toggleHeading({ level }).run();
+    Actions.run(`format:heading:${level}`);
   }
   headingDropdownOpen.value = false;
 }
@@ -75,19 +78,7 @@ function updateCurrentColors() {
 }
 
 function setLink() {
-  const previousUrl = getEditor().getAttributes("link").href;
-  const url = window.prompt("Enter URL:", previousUrl);
-
-  if (url === null) {
-    return;
-  }
-
-  if (url === "") {
-    getEditor().chain().focus().extendMarkRange("link").unsetLink().run();
-    return;
-  }
-
-  getEditor().chain().focus().extendMarkRange("link").setLink({ href: url }).run();
+  Actions.run("format:link");
 }
 
 function setTextColor(event) {
@@ -99,7 +90,7 @@ function setBgColor(event) {
 }
 
 function clearBgColor() {
-  getEditor().chain().focus().unsetBackgroundColor().run();
+  Actions.run("format:color:clear");
 }
 
 function togglePin() {
@@ -109,9 +100,21 @@ function togglePin() {
 }
 
 function checkVisibility() {
-  isInTable.value = getEditor().isActive("table");
-  isInColumnLayout.value = getEditor().isActive("columnLayout");
-  isImageActive.value = isImageSelected(getEditor());
+  const editor = getEditor();
+  
+  // If editor is not available or destroyed, unregister actions and hide toolbar
+  if (!editor || editor.isDestroyed) {
+    if (isEditMode.value) {
+      isEditMode.value = false;
+      unregisterFormattingActions();
+    }
+    shouldShow.value = false;
+    return;
+  }
+  
+  isInTable.value = editor.isActive("table");
+  isInColumnLayout.value = editor.isActive("columnLayout");
+  isImageActive.value = isImageSelected(editor);
   updateCurrentHeadingLevel();
   updateCurrentColors();
 
@@ -251,6 +254,16 @@ function resetImage() {
   updateImageInfo();
 }
 
+function canIndentListItem() {
+  const editor = getEditor();
+  return editor.can().sinkListItem('listItem') || editor.can().sinkListItem('taskItem');
+}
+
+function canOutdentListItem() {
+  const editor = getEditor();
+  return editor.can().liftListItem('listItem') || editor.can().liftListItem('taskItem');
+}
+
 function setColumnCount(newCount) {
   const { state } = getEditor();
   const { selection } = state;
@@ -297,21 +310,7 @@ function setColumnCount(newCount) {
 }
 
 function deleteColumnLayout() {
-  const { state } = getEditor();
-  const { selection } = state;
-  const { $from } = selection;
-
-  // Find and delete the column layout node
-  for (let d = $from.depth; d > 0; d--) {
-    const node = $from.node(d);
-    if (node.type.name === "columnLayout") {
-      const pos = $from.before(d);
-      const { tr } = state;
-      tr.delete(pos, pos + node.nodeSize);
-      getEditor().view.dispatch(tr);
-      return;
-    }
-  }
+  Actions.run("format:columns:delete");
 }
 
 function updatePosition() {
@@ -415,6 +414,30 @@ function handleClickOutside(event) {
   }
 }
 
+// Handle color picker events from Actions
+function handleTextColorOpen() {
+  textColorInput.value?.click();
+}
+
+function handleBgColorOpen() {
+  bgColorInput.value?.click();
+}
+
+// Handle edit mode changes
+function handleEditModeStart() {
+  if (!isEditMode.value) {
+    isEditMode.value = true;
+    registerFormattingActions();
+  }
+}
+
+function handleEditModeEnd() {
+  if (isEditMode.value) {
+    isEditMode.value = false;
+    unregisterFormattingActions();
+  }
+}
+
 onMounted(() => {
   const savedPinState = localStorage.getItem("toolbar-pinned");
   if (savedPinState !== null) {
@@ -427,9 +450,25 @@ onMounted(() => {
   document.addEventListener("pointerup", handleClickOutside);
   document.addEventListener("scroll", updatePosition, { passive: true, capture: true });
   window.addEventListener("resize", updatePosition, { passive: true });
+
+  // Listen for edit mode events
+  window.addEventListener("edit-mode-start", handleEditModeStart);
+  window.addEventListener("editor-ready", handleEditModeStart);
+
+  // Subscribe to color picker events
+  Actions.subscribe("format:color:text:open", handleTextColorOpen);
+  Actions.subscribe("format:color:background:open", handleBgColorOpen);
 });
 
 onBeforeUnmount(() => {
+  // Unregister formatting actions if still in edit mode
+  if (isEditMode.value) {
+    unregisterFormattingActions();
+  }
+
+  window.removeEventListener("edit-mode-start", handleEditModeStart);
+  window.removeEventListener("editor-ready", handleEditModeStart);
+
   window.removeEventListener("editor-update", checkVisibility);
 
   document.removeEventListener("keydown", handleKeyDown);
@@ -476,10 +515,10 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="toolbar-section">
-        <!-- Heading Dropdown -->
+        <!-- Undo/Redo -->
         <div class="menu-group">
         <button
-        @click="getEditor().commands.undo()"
+        @click="Actions.run('format:undo')"
         class="menu-btn"
         title="Undo (Ctrl+Z)"
         type="button"
@@ -487,7 +526,7 @@ onBeforeUnmount(() => {
             <Icon name="undo" class="icon" />
         </button>
         <button
-        @click="getEditor().commands.redo()"
+        @click="Actions.run('format:redo')"
         class="menu-btn"
         title="Redo (Ctrl+Y)"
         type="button"
@@ -539,7 +578,7 @@ onBeforeUnmount(() => {
       <!-- Text Formatting -->
       <div class="menu-group">
         <button
-          @click="getEditor().chain().focus().toggleBold().run()"
+          @click="Actions.run('format:bold')"
           :class="['menu-btn', { active: getEditor().isActive('bold') }]"
           title="Bold"
           type="button"
@@ -547,7 +586,7 @@ onBeforeUnmount(() => {
           <Icon name="bold" class="icon" />
         </button>
         <button
-          @click="getEditor().chain().focus().toggleItalic().run()"
+          @click="Actions.run('format:italic')"
           :class="['menu-btn', { active: getEditor().isActive('italic') }]"
           title="Italic"
           type="button"
@@ -555,7 +594,7 @@ onBeforeUnmount(() => {
           <Icon name="italic" class="icon" />
         </button>
         <button
-          @click="getEditor().chain().focus().toggleUnderline().run()"
+          @click="Actions.run('format:underline')"
           :class="['menu-btn', { active: getEditor().isActive('underline') }]"
           title="Underline"
           type="button"
@@ -563,7 +602,7 @@ onBeforeUnmount(() => {
           <Icon name="underline" class="icon" />
         </button>
         <button
-          @click="getEditor().chain().focus().toggleStrike().run()"
+          @click="Actions.run('format:strikethrough')"
           :class="['menu-btn', { active: getEditor().isActive('strike') }]"
           title="Strikethrough"
           type="button"
@@ -577,7 +616,7 @@ onBeforeUnmount(() => {
       <!-- Lists -->
       <div class="menu-group">
         <button
-          @click="getEditor().chain().focus().toggleBulletList().run()"
+          @click="Actions.run('format:list:bullet')"
           :class="['menu-btn', { active: getEditor().isActive('bulletList') }]"
           title="Bullet List"
           type="button"
@@ -585,7 +624,7 @@ onBeforeUnmount(() => {
           <Icon name="list-unordered" class="icon" />
         </button>
         <button
-          @click="getEditor().chain().focus().toggleOrderedList().run()"
+          @click="Actions.run('format:list:ordered')"
           :class="['menu-btn', { active: getEditor().isActive('orderedList') }]"
           title="Numbered List"
           type="button"
@@ -593,12 +632,30 @@ onBeforeUnmount(() => {
           <Icon name="list-ordered" class="icon" />
         </button>
         <button
-          @click="getEditor().chain().focus().toggleTaskList().run()"
+          @click="Actions.run('format:list:task')"
           :class="['menu-btn', { active: getEditor().isActive('taskList') }]"
           title="Task List"
           type="button"
         >
           <Icon name="list-check" class="icon" />
+        </button>
+        <button
+          @click="Actions.run('format:list:indent')"
+          :class="['menu-btn']"
+          :disabled="!canIndentListItem()"
+          title="Indent List Item"
+          type="button"
+        >
+          <Icon name="indent" class="icon" />
+        </button>
+        <button
+          @click="Actions.run('format:list:outdent')"
+          :class="['menu-btn']"
+          :disabled="!canOutdentListItem()"
+          title="Outdent List Item"
+          type="button"
+        >
+          <Icon name="outdent" class="icon" />
         </button>
       </div>
 
@@ -607,7 +664,7 @@ onBeforeUnmount(() => {
       <!-- Text Alignment -->
       <div class="menu-group">
         <button
-          @click="getEditor().chain().focus().setTextAlign('left').run()"
+          @click="Actions.run('format:align:left')"
           :class="['menu-btn', { active: getEditor().isActive({ textAlign: 'left' }) }]"
           title="Align Left"
           type="button"
@@ -615,7 +672,7 @@ onBeforeUnmount(() => {
           <Icon name="align-left" class="icon" />
         </button>
         <button
-          @click="getEditor().chain().focus().setTextAlign('center').run()"
+          @click="Actions.run('format:align:center')"
           :class="['menu-btn', { active: getEditor().isActive({ textAlign: 'center' }) }]"
           title="Align Center"
           type="button"
@@ -623,7 +680,7 @@ onBeforeUnmount(() => {
           <Icon name="align-center" class="icon" />
         </button>
         <button
-          @click="getEditor().chain().focus().setTextAlign('right').run()"
+          @click="Actions.run('format:align:right')"
           :class="['menu-btn', { active: getEditor().isActive({ textAlign: 'right' }) }]"
           title="Align Right"
           type="button"
@@ -631,7 +688,7 @@ onBeforeUnmount(() => {
           <Icon name="align-right" class="icon" />
         </button>
         <button
-          @click="getEditor().chain().focus().setTextAlign('justify').run()"
+          @click="Actions.run('format:align:justify')"
           :class="['menu-btn', { active: getEditor().isActive({ textAlign: 'justify' }) }]"
           title="Justify"
           type="button"
@@ -725,7 +782,7 @@ onBeforeUnmount(() => {
       <!-- Column Operations -->
       <div class="menu-group">
         <button
-          @click="getEditor().chain().focus().addColumnBefore().run()"
+          @click="Actions.run('format:table:addColumnBefore')"
           class="menu-btn"
           title="Add Column Before"
           type="button"
@@ -738,7 +795,7 @@ onBeforeUnmount(() => {
           </svg>
         </button>
         <button
-          @click="getEditor().chain().focus().addColumnAfter().run()"
+          @click="Actions.run('format:table:addColumnAfter')"
           class="menu-btn"
           title="Add Column After"
           type="button"
@@ -751,7 +808,7 @@ onBeforeUnmount(() => {
           </svg>
         </button>
         <button
-          @click="getEditor().chain().focus().deleteColumn().run()"
+          @click="Actions.run('format:table:deleteColumn')"
           class="menu-btn menu-btn--danger"
           title="Delete Column"
           type="button"
@@ -770,7 +827,7 @@ onBeforeUnmount(() => {
       <!-- Row Operations -->
       <div class="menu-group">
         <button
-          @click="getEditor().chain().focus().addRowBefore().run()"
+          @click="Actions.run('format:table:addRowBefore')"
           class="menu-btn"
           title="Add Row Before"
           type="button"
@@ -783,7 +840,7 @@ onBeforeUnmount(() => {
           </svg>
         </button>
         <button
-          @click="getEditor().chain().focus().addRowAfter().run()"
+          @click="Actions.run('format:table:addRowAfter')"
           class="menu-btn"
           title="Add Row After"
           type="button"
@@ -796,7 +853,7 @@ onBeforeUnmount(() => {
           </svg>
         </button>
         <button
-          @click="getEditor().chain().focus().deleteRow().run()"
+          @click="Actions.run('format:table:deleteRow')"
           class="menu-btn menu-btn--danger"
           title="Delete Row"
           type="button"
@@ -854,7 +911,7 @@ onBeforeUnmount(() => {
           </svg>
         </button>
         <button
-          @click="getEditor().chain().focus().mergeCells().run()"
+          @click="Actions.run('format:table:mergeCells')"
           class="menu-btn"
           title="Merge Cells"
           type="button"
@@ -864,7 +921,7 @@ onBeforeUnmount(() => {
           </svg>
         </button>
         <button
-          @click="getEditor().chain().focus().splitCell().run()"
+          @click="Actions.run('format:table:splitCell')"
           class="menu-btn"
           title="Split Cell"
           type="button"
@@ -934,7 +991,7 @@ onBeforeUnmount(() => {
       <!-- Delete Table -->
       <div class="menu-group">
         <button
-          @click="getEditor().chain().focus().deleteTable().run()"
+          @click="Actions.run('format:table:delete')"
           class="menu-btn menu-btn--danger"
           title="Delete Table"
           type="button"
@@ -950,7 +1007,7 @@ onBeforeUnmount(() => {
     <div v-if="isInColumnLayout" class="toolbar-section hidden! lg:flex!">
         <div class="menu-group">
         <button
-            @click="setColumnCount(2)"
+            @click="Actions.run('format:columns:2')"
             :class="['menu-btn', { active: currentColumnCount === 2 }]"
             title="2 Columns"
             type="button"
@@ -958,7 +1015,7 @@ onBeforeUnmount(() => {
             <Icon name="columns-2" />
         </button>
         <button
-            @click="setColumnCount(3)"
+            @click="Actions.run('format:columns:3')"
             :class="['menu-btn', { active: currentColumnCount === 3 }]"
             title="3 Columns"
             type="button"
@@ -966,7 +1023,7 @@ onBeforeUnmount(() => {
             <Icon name="columns-3" />
         </button>
         <button
-            @click="setColumnCount(4)"
+            @click="Actions.run('format:columns:4')"
             :class="['menu-btn', { active: currentColumnCount === 4 }]"
             title="4 Columns"
             type="button"
@@ -980,7 +1037,7 @@ onBeforeUnmount(() => {
         <!-- Delete Column Layout -->
         <div class="menu-group">
         <button
-            @click="deleteColumnLayout"
+            @click="Actions.run('format:columns:delete')"
             class="menu-btn menu-btn--danger"
             title="Delete Column Layout"
             type="button"

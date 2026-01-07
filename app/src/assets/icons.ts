@@ -50,3 +50,5 @@ export { default as importIcon } from "../assets/icons/import.svg?raw";
 export { default as cmdIcon } from "../assets/icons/cmd.svg?raw";
 export { default as ctrlIcon } from "../assets/icons/ctrl.svg?raw";
 export { default as shiftIcon } from "../assets/icons/shift.svg?raw";
+export { default as indentIcon } from "../assets/icons/indent.svg?raw";
+export { default as outdentIcon } from "../assets/icons/outdent.svg?raw";
