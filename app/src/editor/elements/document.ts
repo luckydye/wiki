@@ -60,19 +60,6 @@ function createEditor(
     },
     onUpdate: () => {
     },
-    editorProps: {
-      handleKeyDown: (_view, event) => {
-        const ev = new CustomEvent("editor-keydown", { detail: event, cancelable: true });
-        window.dispatchEvent(ev);
-
-        if (ev.defaultPrevented === true) {
-          event.preventDefault();
-          return true;
-        }
-
-        return false;
-      },
-    },
     extensions: [
       ...contentExtensions(spaceId, documentId),
 

@@ -1,7 +1,6 @@
 <script setup>
 import { defineAsyncComponent, onMounted, onUnmounted, ref, computed, watch } from "vue";
 import ToolbarFormatting from "./ToolbarFormatting.vue";
-import SlashCommands from "./SlashCommands.vue";
 import DiffView from "./DiffView.vue";
 import { useSpace } from "../composeables/useSpace.js";
 
@@ -182,9 +181,6 @@ onUnmounted(() => {
       </document-view>
     </div>
   </div>
-
-  <!-- Slash Commands Menu -->
-  <SlashCommands :spaceId="spaceId" :documentId="documentId" />
 
   <!-- Format Sidebar -->
   <!-- <FormatSidebar v-if="isEditing && isEditingReady && !viewingRevision" /> -->
