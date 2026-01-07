@@ -101,7 +101,7 @@ function togglePin() {
 
 function checkVisibility() {
   const editor = getEditor();
-  
+
   // If editor is not available or destroyed, unregister actions and hide toolbar
   if (!editor || editor.isDestroyed) {
     if (isEditMode.value) {
@@ -111,7 +111,7 @@ function checkVisibility() {
     shouldShow.value = false;
     return;
   }
-  
+
   isInTable.value = editor.isActive("table");
   isInColumnLayout.value = editor.isActive("columnLayout");
   isImageActive.value = isImageSelected(editor);
@@ -1079,7 +1079,7 @@ onBeforeUnmount(() => {
 
 .toolbar-section {
   @apply flex items-center gap-0.5 rounded-md p-1 max-w-[95vw] overflow-x-auto;
-  @apply bg-neutral-50 shadow-lg;
+  @apply bg-neutral-200 shadow-lg;
 }
 
 .menu-group {

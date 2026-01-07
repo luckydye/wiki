@@ -125,7 +125,9 @@ export function contentExtensions(spaceId: string, documentId: string): Extensio
         };
       },
     }),
-    TaskItem,
+    TaskItem.configure({
+      nested: true,
+    }),
     TaskList,
     Code,
     CodeBlock,

@@ -199,10 +199,11 @@ export function registerFormattingActions() {
     run: async () => {
       if (!isEditorAvailable()) return;
       const editor = getEditor();
-      if (editor.can().sinkListItem("listItem")) {
-        editor.chain().focus().sinkListItem("listItem").run();
-      } else if (editor.can().sinkListItem("taskItem")) {
+      // Check taskItem first since isActive is more reliable than can() for determining node type
+      if (editor.isActive("taskItem") && editor.can().sinkListItem("taskItem")) {
         editor.chain().focus().sinkListItem("taskItem").run();
+      } else if (editor.can().sinkListItem("listItem")) {
+        editor.chain().focus().sinkListItem("listItem").run();
       }
     },
   });
@@ -214,10 +215,11 @@ export function registerFormattingActions() {
     run: async () => {
       if (!isEditorAvailable()) return;
       const editor = getEditor();
-      if (editor.can().liftListItem("listItem")) {
-        editor.chain().focus().liftListItem("listItem").run();
-      } else if (editor.can().liftListItem("taskItem")) {
+      // Check taskItem first since isActive is more reliable than can() for determining node type
+      if (editor.isActive("taskItem") && editor.can().liftListItem("taskItem")) {
         editor.chain().focus().liftListItem("taskItem").run();
+      } else if (editor.can().liftListItem("listItem")) {
+        editor.chain().focus().liftListItem("listItem").run();
       }
     },
   });

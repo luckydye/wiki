@@ -105,10 +105,14 @@ class DocumentView extends HTMLElement {
   editor?: Editor;
   store?: IndexedDBStore<EditorStoreEntry>;
 
+  get root() {
+    return this.shadowRoot;
+  }
+
   connectedCallback() {
-    if (!this.shadowRoot) {
+    if (!this.root) {
       // no template for declarative shadow DOM
-      const shadow = this.attachShadow({ mode: "open", delegatesFocus: true });
+      const shadow = this.attachShadow({ mode: "open" });
       Object.assign(shadow, {
         createRange: document.createRange.bind(document)
       });
@@ -145,7 +149,7 @@ class DocumentView extends HTMLElement {
 
   init(spaceId: string, documentId: string, user: User) {
     // init is called from the outside, will overwrite shadow innerHTML
-    const shadow = this.shadowRoot;
+    const shadow = this.root;
     if (!shadow) {
       throw new Error("No shadow root");
     }
@@ -169,14 +173,14 @@ class DocumentView extends HTMLElement {
   }
 
   attachListeners() {
-    this.shadowRoot?.addEventListener("input", (e) => {
+    this.root?.addEventListener("input", (e) => {
       if (this.editor) return; // we ignore checkbox changes in read mode only
 
       window.dispatchEvent(new CustomEvent("edit-mode-start"));
     }, { capture: true })
 
     // make link previews work
-    this.shadowRoot?.addEventListener("pointerover", (e) => {
+    this.root?.addEventListener("pointerover", (e) => {
       document.dispatchEvent(new CustomEvent("hover", {
         detail: {
           target: e.target
@@ -185,7 +189,7 @@ class DocumentView extends HTMLElement {
     }, {
       capture: true
     });
-    this.shadowRoot?.addEventListener("pointerout", (e) => {
+    this.root?.addEventListener("pointerout", (e) => {
       document.dispatchEvent(new CustomEvent("mouseout"));
     }, {
       capture: true
@@ -193,7 +197,7 @@ class DocumentView extends HTMLElement {
 
     // Handle clicks on internal document links - open in overlay
     // Hold Shift to navigate normally instead
-    this.shadowRoot?.addEventListener("click", ((e: MouseEvent) => {
+    this.root?.addEventListener("click", ((e: MouseEvent) => {
       if (e.shiftKey || e.ctrlKey || e.metaKey) return;
 
       const target = e.target as HTMLElement;
