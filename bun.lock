@@ -17,7 +17,7 @@
         "@hocuspocus/server": "^3.3.0",
         "@hocuspocus/transformer": "^3.4.0",
         "@libsql/client": "^0.15.15",
-        "@sv/elements": "^4.0.3",
+        "@sv/elements": "^4.4.0",
         "@tailwindcss/vite": "^4.1.16",
         "@tanstack/vue-query": "^5.91.1",
         "@tiptap/core": "3.9.1",
@@ -422,7 +422,7 @@
 
     "@standard-schema/spec": ["@standard-schema/spec@1.0.0", "", {}, "sha512-m2bOd0f2RT9k8QJx1JN85cZYyH1RqFBdlwtkSlf4tBDYLCiiZnv1fIIwacK6cqwXavOydf0NPToMQgpKq+dVlA=="],
 
-    "@sv/elements": ["@sv/elements@4.0.3", "https://gitlab.s-v.de/api/v4/projects/1560/packages/npm/@sv/elements/-/@sv/elements-4.0.3.tgz", { "dependencies": { "@floating-ui/dom": "^1.6.7", "@sv/scroll-lock": "^1.1.1", "lit": "^3.1.3" } }, "sha1-bItakyb2ri40/w1HYnvrTjkL0LI="],
+    "@sv/elements": ["@sv/elements@4.4.0", "https://gitlab.s-v.de/api/v4/projects/1560/packages/npm/@sv/elements/-/@sv/elements-4.4.0.tgz", { "dependencies": { "@floating-ui/dom": "^1.6.7", "@sv/scroll-lock": "^1.1.1", "lit": "^3.1.3" } }, "sha1-mNwg1qAS7dzrjANhfaP4L71e5KA="],
 
     "@sv/scroll-lock": ["@sv/scroll-lock@1.1.1", "https://gitlab.s-v.de/api/v4/projects/1560/packages/npm/@sv/scroll-lock/-/@sv/scroll-lock-1.1.1.tgz", {}, "sha1-6QbzAx4zOtLya2y6f7sSveoB6T0="],
 

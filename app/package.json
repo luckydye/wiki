@@ -9,7 +9,7 @@
 		"@hocuspocus/server": "^3.3.0",
 		"@hocuspocus/transformer": "^3.4.0",
 		"@libsql/client": "^0.15.15",
-		"@sv/elements": "^4.0.3",
+		"@sv/elements": "^4.4.0",
 		"@tailwindcss/vite": "^4.1.16",
 		"@tanstack/vue-query": "^5.91.1",
 		"@tiptap/core": "3.9.1",

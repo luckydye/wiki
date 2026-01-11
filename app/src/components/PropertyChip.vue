@@ -5,6 +5,7 @@ import type { SelectMenuItem } from "./SelectMenu.vue";
 import SelectMenu from "./SelectMenu.vue";
 import Tooltip from "./Tooltip.vue";
 import "@sv/elements/blur";
+import "@sv/elements/calendar";
 import { plusIcon } from "~/src/assets/icons";
 import Icon from "./Icon.vue";
 import { twMerge } from "tailwind-merge";
@@ -195,11 +196,10 @@ onMounted(() => {
 
       <!-- Date Picker for date type -->
       <div v-if="property.type === 'date'">
-        <input
-          type="date"
-          v-model="dateValue"
+        <a-calendar
+          :value="dateValue"
           @change="handleDateChange"
-          class="w-full px-3xs py-2 text-sm text-neutral-950 bg-transparent border border-neutral-200 rounded-md outline-none focus:border-primary-500 transition-colors"
+          class="p-2 w-[250px]"
         />
       </div>
 
@@ -233,5 +233,14 @@ a-blur :deep(svg) {
   width: 18px;
   height: 18px;
   color: var(--color-neutral-950);
+}
+
+a-calendar {
+    --calendar-hover-bg: rgba(250, 250, 250, 0.1);
+    --calendar-selected-bg: var(--color-primary-500);
+    --calendar-selected-color: white;
+    --calendar-range-bg: var(--color-primary-300);
+    --calendar-highlight-bg: rgba(234, 179, 8, 0.4);
+    --calendar-focus-outline: currentColor;
 }
 </style>
